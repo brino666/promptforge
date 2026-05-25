@@ -453,13 +453,9 @@ Make each field specific, actionable, and meaningfully improved from the origina
 });
 
     const data = await response.json();
-    const text = data.content.map(i => i.text || '').join('');
-    const clean = text.replace(/```json|```/g, '').trim();
-    const parsed = JSON.parse(clean);
-
-    parsedBlocks = parsed;
-    assembledPrompt = parsed.assembled;
-    renderOutput(parsed);
+parsedBlocks = data;
+assembledPrompt = data.assembled;
+renderOutput(data);
 
   } catch (err) {
     errorMsg.textContent = 'Something went wrong. Please try again.';
