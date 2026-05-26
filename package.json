@@ -1,0 +1,23 @@
+{
+  "name": "promptforge",
+  "version": "1.0.0",
+  "description": "PROMPT Forge - Sharpen Your AI Prompts",
+  "main": "index.html",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/brino666/promptforge.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/brino666/promptforge/issues"
+  },
+  "homepage": "https://github.com/brino666/promptforge#readme",
+  "dependencies": {
+    "@vercel/analytics": "^2.0.1"
+  }
+}
