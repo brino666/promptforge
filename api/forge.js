@@ -17,7 +17,7 @@ module.exports = async function handler(req, res) {
         'anthropic-version': '2023-06-01'
       },
       body: JSON.stringify({
-        model: 'claude-sonnet-4-20250514',
+        model: 'claude-sonnet-4-5',
         max_tokens: 1000,
         system: `You are an expert prompt engineer. Restructure the user's prompt using the PROMPT framework. Respond ONLY with a valid JSON object with keys: position, context, objective, manner, audience, format, forge, assembled. No preamble, no markdown.`,
         messages: [{ role: 'user', content: `Convert this prompt: "${prompt}"` }]
