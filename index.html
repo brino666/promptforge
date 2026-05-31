@@ -460,9 +460,11 @@ Make each field specific, actionable, and meaningfully improved from the origina
   body: JSON.stringify({ prompt: raw })
 });
 
-    const data = await response.json();
+ const data = await response.json();
 if (!response.ok) throw new Error(data.error || 'Request failed');
-const parsed = JSON.parse(data.content[0].text);
+const rawText = data.content[0].text;
+const clean = rawText.replace(/```json|```/g, '').trim();
+const parsed = JSON.parse(clean);
 parsedBlocks = parsed;
 assembledPrompt = parsed.assembled;
 renderOutput(parsed);
