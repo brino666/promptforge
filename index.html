@@ -461,10 +461,11 @@ Make each field specific, actionable, and meaningfully improved from the origina
 });
 
     const data = await response.json();
-parsedBlocks = data;
-assembledPrompt = data.assembled;
-renderOutput(data);
-
+if (!response.ok) throw new Error(data.error || 'Request failed');
+const parsed = JSON.parse(data.content[0].text);
+parsedBlocks = parsed;
+assembledPrompt = parsed.assembled;
+renderOutput(parsed);
   } catch (err) {
     errorMsg.textContent = 'Something went wrong. Please try again.';
     errorMsg.classList.add('visible');
