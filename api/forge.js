@@ -129,10 +129,11 @@ No preamble, no explanation, no markdown.`,
     });
 
   } catch (error) {
-    console.error('[forge] error:', error.message);
-    return res.status(500).json({
-      error: 'Failed to process prompt',
-      details: process.env.NODE_ENV === 'development' ? error.message : undefined,
-    });
-  }
+  console.error('[forge] error:', error.message);
+  console.error('[forge] stack:', error.stack);
+  return res.status(500).json({
+    error: 'Failed to process prompt',
+    details: error.message,
+  });
+}
 }
