@@ -1,5 +1,5 @@
 // memory/types.js
-// PromptForge Memory System v2
+// Memory System v2
 // "Remember what was learned, not what was said."
 
 // Tier budgets in bytes

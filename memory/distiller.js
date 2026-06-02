@@ -1,5 +1,5 @@
 // memory/distiller.js
-// PromptForge Memory System — Meaning Extraction
+// Memory System — Meaning Extraction
 // Runs once at session end. Extracts what was LEARNED, not what was SAID.
 // Uses claude-haiku — cheapest model, ~$0.001 per session.
 
