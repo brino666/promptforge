@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>PROMPTFORGE — translate to AI</title>
+<title>Theius — translate to AI</title>
 <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -29,7 +29,6 @@
     overflow-x: hidden;
   }
 
-  /* Grid background */
   body::before {
     content: '';
     position: fixed;
@@ -42,317 +41,64 @@
     z-index: 0;
   }
 
-  .container {
-    max-width: 860px;
-    margin: 0 auto;
-    padding: 0 24px;
-    position: relative;
-    z-index: 1;
-  }
+  .container { max-width: 860px; margin: 0 auto; padding: 0 24px; position: relative; z-index: 1; }
 
-  /* Header */
-  header {
-    padding: 48px 0 40px;
-    border-bottom: 1px solid var(--border);
-  }
+  header { padding: 48px 0 40px; border-bottom: 1px solid var(--border); }
 
-  .logo {
-    display: flex;
-    align-items: baseline;
-    gap: 12px;
-    margin-bottom: 12px;
-  }
+  .logo { display: flex; align-items: baseline; gap: 12px; margin-bottom: 12px; }
+  .logo-text { font-size: 13px; font-family: var(--font-mono); color: var(--accent); letter-spacing: 0.15em; text-transform: uppercase; }
 
-  .logo-text {
-    font-size: 13px;
-    font-family: var(--font-mono);
-    color: var(--accent);
-    letter-spacing: 0.15em;
-    text-transform: uppercase;
-  }
-
-  h1 {
-    font-size: clamp(36px, 6vw, 64px);
-    font-weight: 800;
-    line-height: 1;
-    letter-spacing: -0.03em;
-  }
-
+  h1 { font-size: clamp(36px, 6vw, 64px); font-weight: 800; line-height: 1; letter-spacing: -0.03em; }
   h1 span { color: var(--accent); }
 
-  .tagline {
-    margin-top: 14px;
-    font-size: 15px;
-    color: var(--muted);
-    font-family: var(--font-mono);
-    letter-spacing: 0.02em;
-  }
+  .tagline { margin-top: 14px; font-size: 15px; color: var(--muted); font-family: var(--font-mono); letter-spacing: 0.02em; }
 
-  /* Input section */
-  .input-section {
-    padding: 40px 0 32px;
-  }
-
-  .section-label {
-    font-size: 11px;
-    font-family: var(--font-mono);
-    letter-spacing: 0.15em;
-    text-transform: uppercase;
-    color: var(--muted);
-    margin-bottom: 12px;
-  }
+  .input-section { padding: 40px 0 32px; }
+  .section-label { font-size: 11px; font-family: var(--font-mono); letter-spacing: 0.15em; text-transform: uppercase; color: var(--muted); margin-bottom: 12px; }
 
   textarea {
-    width: 100%;
-    background: var(--surface);
-    border: 1px solid var(--border);
-    color: var(--text);
-    font-family: var(--font-mono);
-    font-size: 14px;
-    line-height: 1.6;
-    padding: 20px;
-    resize: vertical;
-    min-height: 140px;
-    outline: none;
-    transition: border-color 0.2s;
+    width: 100%; background: var(--surface); border: 1px solid var(--border); color: var(--text);
+    font-family: var(--font-mono); font-size: 14px; line-height: 1.6; padding: 20px; resize: vertical; min-height: 140px; outline: none;
   }
-
   textarea:focus { border-color: var(--accent); }
-  textarea::placeholder { color: var(--muted); }
 
   .convert-btn {
-    margin-top: 16px;
-    background: var(--accent);
-    color: #000;
-    border: none;
-    font-family: var(--font-display);
-    font-weight: 700;
-    font-size: 14px;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    padding: 14px 32px;
-    cursor: pointer;
-    transition: transform 0.15s, box-shadow 0.15s;
-    display: flex;
-    align-items: center;
-    gap: 10px;
+    margin-top: 16px; background: var(--accent); color: #000; border: none; font-family: var(--font-display); font-weight: 700;
+    font-size: 14px; letter-spacing: 0.08em; text-transform: uppercase; padding: 14px 32px; cursor: pointer;
   }
 
-  .convert-btn:hover {
-    transform: translate(-2px, -2px);
-    box-shadow: 4px 4px 0 var(--accent2);
-  }
-
-  .convert-btn:active { transform: translate(0,0); box-shadow: none; }
-
-  .convert-btn:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-    transform: none;
-    box-shadow: none;
-  }
-
-  .spinner {
-    width: 16px; height: 16px;
-    border: 2px solid #000;
-    border-top-color: transparent;
-    border-radius: 50%;
-    animation: spin 0.6s linear infinite;
-    display: none;
-  }
-
+  .spinner { width: 16px; height: 16px; border: 2px solid #000; border-top-color: transparent; border-radius: 50%; animation: spin 0.6s linear infinite; display: none; }
   .spinner.active { display: block; }
-
   @keyframes spin { to { transform: rotate(360deg); } }
 
-  /* Output section */
-  .output-section {
-    padding-bottom: 60px;
-    display: none;
-  }
-
+  .output-section { padding-bottom: 60px; display: none; }
   .output-section.visible { display: block; }
 
-  .output-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    margin-bottom: 24px;
-    padding-bottom: 16px;
-    border-bottom: 1px solid var(--border);
-  }
+  .output-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 24px; padding-bottom: 16px; border-bottom: 1px solid var(--border); }
+  .output-title { font-size: 18px; font-weight: 700; letter-spacing: -0.02em; }
 
-  .output-title {
-    font-size: 18px;
-    font-weight: 700;
-    letter-spacing: -0.02em;
-  }
+  .copy-all-btn { font-family: var(--font-mono); font-size: 12px; background: transparent; border: 1px solid var(--border); color: var(--muted); padding: 8px 16px; cursor: pointer; }
 
-  .copy-all-btn {
-    font-family: var(--font-mono);
-    font-size: 12px;
-    background: transparent;
-    border: 1px solid var(--border);
-    color: var(--muted);
-    padding: 8px 16px;
-    cursor: pointer;
-    letter-spacing: 0.08em;
-    transition: all 0.2s;
-  }
+  .prompt-blocks { display: flex; flex-direction: column; gap: 12px; margin-bottom: 28px; }
 
-  .copy-all-btn:hover { border-color: var(--accent); color: var(--accent); }
+  .prompt-block { background: var(--surface); border: 1px solid var(--border); display: grid; grid-template-columns: 56px 1fr auto; align-items: start; gap: 0; }
 
-  /* PROMPT blocks */
-  .prompt-blocks {
-    display: flex;
-    flex-direction: column;
-    gap: 12px;
-    margin-bottom: 28px;
-  }
+  .block-letter { font-size: 28px; font-weight: 800; color: var(--accent); padding: 18px 0 18px 18px; }
+  .block-content { padding: 14px 16px; border-left: 1px solid var(--border); }
+  .block-name { font-size: 10px; font-family: var(--font-mono); letter-spacing: 0.15em; text-transform: uppercase; color: var(--muted); margin-bottom: 6px; }
+  .block-text { font-size: 14px; line-height: 1.6; color: var(--text); font-family: var(--font-mono); white-space: pre-wrap; }
 
-  .prompt-block {
-    background: var(--surface);
-    border: 1px solid var(--border);
-    display: grid;
-    grid-template-columns: 56px 1fr auto;
-    align-items: start;
-    gap: 0;
-    animation: fadeUp 0.4s ease both;
-  }
+  .final-prompt { background: var(--surface2); border: 1px solid var(--accent); padding: 24px; }
+  .final-prompt-label { font-size: 11px; font-family: var(--font-mono); letter-spacing: 0.15em; text-transform: uppercase; color: var(--accent); margin-bottom: 14px; }
+  .final-prompt-text { font-family: var(--font-mono); font-size: 13px; line-height: 1.7; color: var(--text); white-space: pre-wrap; }
 
-  @keyframes fadeUp {
-    from { opacity: 0; transform: translateY(12px); }
-    to { opacity: 1; transform: translateY(0); }
-  }
-
-  .block-letter {
-    font-size: 28px;
-    font-weight: 800;
-    color: var(--accent);
-    padding: 18px 0 18px 18px;
-    line-height: 1;
-    font-family: var(--font-display);
-  }
-
-  .block-content {
-    padding: 14px 16px;
-    border-left: 1px solid var(--border);
-  }
-
-  .block-name {
-    font-size: 10px;
-    font-family: var(--font-mono);
-    letter-spacing: 0.15em;
-    text-transform: uppercase;
-    color: var(--muted);
-    margin-bottom: 6px;
-  }
-
-  .block-text {
-    font-size: 14px;
-    line-height: 1.6;
-    color: var(--text);
-    font-family: var(--font-mono);
-    white-space: pre-wrap;
-  }
-
-  .block-copy {
-    padding: 18px 18px 18px 12px;
-    background: transparent;
-    border: none;
-    cursor: pointer;
-    color: var(--muted);
-    transition: color 0.2s;
-    font-size: 14px;
-  }
-
-  .block-copy:hover { color: var(--accent); }
-
-  /* Final prompt */
-  .final-prompt {
-    background: var(--surface2);
-    border: 1px solid var(--accent);
-    padding: 24px;
-    position: relative;
-  }
-
-  .final-prompt-label {
-    font-size: 11px;
-    font-family: var(--font-mono);
-    letter-spacing: 0.15em;
-    text-transform: uppercase;
-    color: var(--accent);
-    margin-bottom: 14px;
-  }
-
-  .final-prompt-text {
-    font-family: var(--font-mono);
-    font-size: 13px;
-    line-height: 1.7;
-    color: var(--text);
-    white-space: pre-wrap;
-  }
-
-  .copy-final-btn {
-    margin-top: 18px;
-    background: var(--accent);
-    color: #000;
-    border: none;
-    font-family: var(--font-display);
-    font-weight: 700;
-    font-size: 12px;
-    letter-spacing: 0.1em;
-    text-transform: uppercase;
-    padding: 10px 24px;
-    cursor: pointer;
-    transition: transform 0.15s, box-shadow 0.15s;
-  }
-
-  .copy-final-btn:hover {
-    transform: translate(-2px, -2px);
-    box-shadow: 3px 3px 0 var(--accent2);
-  }
-
-  /* Toast */
-  .toast {
-    position: fixed;
-    bottom: 32px;
-    right: 32px;
-    background: var(--accent);
-    color: #000;
-    font-family: var(--font-mono);
-    font-size: 13px;
-    font-weight: 500;
-    padding: 12px 20px;
-    opacity: 0;
-    transform: translateY(8px);
-    transition: all 0.25s;
-    pointer-events: none;
-    z-index: 100;
-  }
-
+  .toast { position: fixed; bottom: 32px; right: 32px; background: var(--accent); color: #000; font-family: var(--font-mono); font-size: 13px; padding: 12px 20px; opacity: 0; transform: translateY(8px); transition: all 0.25s; pointer-events: none; }
   .toast.show { opacity: 1; transform: translateY(0); }
 
-  /* Error */
-  .error-msg {
-    background: #1a0a0a;
-    border: 1px solid #ff4444;
-    color: #ff8888;
-    font-family: var(--font-mono);
-    font-size: 13px;
-    padding: 16px 20px;
-    margin-top: 16px;
-    display: none;
-  }
-
+  .error-msg { background: #1a0a0a; border: 1px solid #ff4444; color: #ff8888; font-family: var(--font-mono); font-size: 13px; padding: 16px 20px; margin-top: 16px; display: none; }
   .error-msg.visible { display: block; }
 
-  /* Divider */
-  .divider {
-    border: none;
-    border-top: 1px solid var(--border);
-    margin: 8px 0 28px;
-  }
+  .divider { border: none; border-top: 1px solid var(--border); margin: 8px 0 28px; }
 </style>
 </head>
 <body>
@@ -362,21 +108,22 @@
     <div class="logo">
       <span class="logo-text">v1.0 — AI Prompt Optimizer</span>
     </div>
-    <h1>PROMPT<span>FORGE</span></h1>
-      <p class="tagline">input a prompt, question or statement</p>
-      <div style="display:flex;gap:10px;margin-top:16px;align-items:center;">
-  <a href="/signin" style="padding:8px 18px;border:1px solid #2a2a2a;border-radius:6px;color:#999;font-family:'IBM Plex Mono',monospace;font-size:12px;text-decoration:none;">Sign in</a>
-  <script async src="https://js.stripe.com/v3/buy-button.js"></script>
-  <stripe-buy-button
-    buy-button-id="buy_btn_1Tc0JlGY4uogKpGBXQZkuWY5"
-    publishable-key="pk_live_51Tb9ckGY4uogKpGBEI5N848ggCSXMz31dPCEztr7aLi5nf3SBvBQmCkSC6pwGKj2kK5u0ydUfgGURPFUuVDT2Hjo00nuXwDmWI"
-  ></stripe-buy-button>
-      </div>
+    <h1>THEIUS</h1>
+    <p class="tagline">input a prompt, question or statement</p>
+
+    <div style="display:flex;gap:10px;margin-top:16px;align-items:center;">
+      <a href="/signin" style="padding:8px 18px;border:1px solid #2a2a2a;border-radius:6px;color:#999;font-family:'IBM Plex Mono',monospace;font-size:12px;text-decoration:none;">Sign in</a>
+      <script async src="https://js.stripe.com/v3/buy-button.js"></script>
+      <stripe-buy-button
+        buy-button-id="buy_btn_1Tc0JlGY4uogKpGBXQZkuWY5"
+        publishable-key="pk_live_51Tb9ckGY4uogKpGBEI5N848ggCSXMz31dPCEztr7aLi5nf3SBvBQmCkSC6pwGKj2kK5u0ydUfgGURPFUuVDT2Hjo00nuXwDmWI"
+      ></stripe-buy-button>
+    </div>
   </header>
 
   <section class="input-section">
     <div class="section-label">Input:</div>
-    <textarea id="rawPrompt" placeholder="Type or copy/paste your existing prompt here — no matter how rough or vague. e.g. 'write me a marketing email for my SaaS product' or 'how do I make toast'"></textarea>
+    <textarea id="rawPrompt" placeholder="Type or copy/paste your existing prompt here — no matter how rough or vague."></textarea>
     <div class="error-msg" id="errorMsg"></div>
     <button class="convert-btn" id="convertBtn" onclick="convertPrompt()">
       <span class="spinner" id="spinner"></span>
@@ -405,16 +152,6 @@
 <div class="toast" id="toast">Copied to clipboard</div>
 
 <script>
-const FRAMEWORK = [
-  { letter: 'P', name: 'Position', desc: 'Role or expertise assigned to the AI' },
-  { letter: 'R', name: 'Relevant Context', desc: 'Background information and situation' },
-  { letter: 'O', name: 'Objective', desc: 'Exactly what the AI should accomplish' },
-  { letter: 'M', name: 'Manner', desc: 'Writing style and tone' },
-  { letter: 'P2', name: 'Purpose / Audience', desc: 'Who the output is for' },
-  { letter: 'T', name: 'Target Format', desc: 'Structure, length, layout of the response' },
-  { letter: 'F', name: 'Forge', desc: 'Rules, constraints, and quality standards' },
-];
-
 let parsedBlocks = {};
 let assembledPrompt = '';
 let blockValues = [];
@@ -434,40 +171,33 @@ async function convertPrompt() {
   errorMsg.classList.remove('visible');
   document.getElementById('outputSection').classList.remove('visible');
 
-  const systemPrompt = `You are an expert prompt engineer. Your job is to take a rough, vague, or incomplete user prompt and restructure it using the PROMPT framework.
-
-The PROMPT framework has these components:
-- P (Position): Assign the AI a specific, high-level role or expertise
-- R (Relevant Context): All important background information needed
-- O (Objective): Crystal clear statement of exactly what the AI should accomplish
-- M (Manner): The writing style and tone
-- P2 (Purpose/Audience): Who the final output is for
-- T (Target Format): How the response should be structured — length, sections, layout
-- F (Forge): Specific rules, constraints, and quality standards
-
-You must respond ONLY with a valid JSON object. No preamble, no explanation, no markdown fences. Just the raw JSON object.
-
-The JSON must have exactly these keys: "position", "context", "objective", "manner", "audience", "format", "forge", "assembled"
-
-"assembled" is the final ready-to-use prompt that combines all components into one clean, powerful prompt paragraph or set of instructions.
-
-Make each field specific, actionable, and meaningfully improved from the original. If information is missing, make smart inferences based on the intent. The assembled prompt should be polished and immediately usable.`;
+  // Basic session context for memory system (expand this as the app grows into full sessions)
+  const sessionContext = {
+    turnCount: 1,
+    conversationSummary: [raw],
+    currentProject: null,
+    currentTask: null
+  };
 
   try {
- const response = await fetch("/api/forge", {
-  method: "POST",
-  headers: { "Content-Type": "application/json" },
-  body: JSON.stringify({ prompt: raw })
-});
+    const response = await fetch("/api/forge", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ prompt: raw, sessionContext })
+    });
 
- const data = await response.json();
-if (!response.ok) throw new Error(data.error || 'Request failed');
-const rawText = data.content[0].text;
-const clean = rawText.replace(/```json|```/g, '').trim();
-const parsed = JSON.parse(clean);
-parsedBlocks = parsed;
-assembledPrompt = parsed.assembled;
-renderOutput(parsed);
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || 'Request failed');
+
+    const rawText = data.content[0].text;
+    const clean = rawText.replace(/```json|```/g, '').trim();
+    const parsed = JSON.parse(clean);
+
+    parsedBlocks = parsed;
+    assembledPrompt = parsed.assembled;
+    renderOutput(parsed);
+
+    // Future: if (data.memoryOffer) { show memory offer UI }
   } catch (err) {
     errorMsg.textContent = 'Something went wrong. Please try again.';
     errorMsg.classList.add('visible');
@@ -491,20 +221,18 @@ function renderOutput(data) {
 
   const container = document.getElementById('promptBlocks');
   container.innerHTML = '';
-
   blockValues = blocks.map(b => b.value);
 
   blocks.forEach((block, i) => {
     const el = document.createElement('div');
     el.className = 'prompt-block';
-    el.style.animationDelay = `${i * 0.06}s`;
     el.innerHTML = `
       <div class="block-letter">${block.letter}</div>
       <div class="block-content">
         <div class="block-name">${block.name}</div>
         <div class="block-text">${escapeHtml(block.value)}</div>
       </div>
-      <button class="block-copy" title="Copy" onclick="copyBlockByIndex(${i})">⎘</button>
+      <button class="block-copy" onclick="copyBlockByIndex(${i})">⎘</button>
     `;
     container.appendChild(el);
   });
@@ -518,59 +246,39 @@ function escapeHtml(str) {
   return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
 
-function copyToClipboard(text, msg) {
-  msg = msg || 'Copied to clipboard';
+function copyToClipboard(text, msg = 'Copied to clipboard') {
   if (navigator.clipboard && window.isSecureContext) {
-    navigator.clipboard.writeText(text)
-      .then(function() { showToast(msg); })
-      .catch(function() { fallbackCopy(text, msg); });
+    navigator.clipboard.writeText(text).then(() => showToast(msg));
   } else {
-    fallbackCopy(text, msg);
-  }
-}
-
-function fallbackCopy(text, msg) {
-  var ta = document.createElement('textarea');
-  ta.value = text;
-  ta.style.position = 'fixed';
-  ta.style.top = '0';
-  ta.style.left = '0';
-  ta.style.opacity = '0';
-  ta.style.pointerEvents = 'none';
-  document.body.appendChild(ta);
-  ta.focus();
-  ta.select();
-  try {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.position = 'fixed';
+    ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.select();
     document.execCommand('copy');
+    document.body.removeChild(ta);
     showToast(msg);
-  } catch(e) {
-    showToast('Select text manually to copy');
   }
-  document.body.removeChild(ta);
 }
 
-function copyBlockByIndex(i) {
-  copyToClipboard(blockValues[i]);
-}
+function copyBlockByIndex(i) { copyToClipboard(blockValues[i]); }
 
-function copyFinal() {
-  copyToClipboard(assembledPrompt, 'Final prompt copied');
-}
+function copyFinal() { copyToClipboard(assembledPrompt, 'Final prompt copied'); }
 
 function copyAll() {
-  var parts = Object.entries(parsedBlocks)
-    .filter(function(e) { return e[0] !== 'assembled'; })
-    .map(function(e) { return '[' + e[0].toUpperCase() + ']\n' + e[1]; });
-  var allText = parts.join('\n\n') + '\n\n[ASSEMBLED PROMPT]\n' + assembledPrompt;
+  const parts = Object.entries(parsedBlocks)
+    .filter(e => e[0] !== 'assembled')
+    .map(e => `[${e[0].toUpperCase()}]\n${e[1]}`);
+  const allText = parts.join('\n\n') + '\n\n[ASSEMBLED PROMPT]\n' + assembledPrompt;
   copyToClipboard(allText, 'All sections copied');
 }
 
 function showToast(msg) {
-  msg = msg || 'Copied to clipboard';
-  var toast = document.getElementById('toast');
+  const toast = document.getElementById('toast');
   toast.textContent = msg;
   toast.classList.add('show');
-  setTimeout(function() { toast.classList.remove('show'); }, 2000);
+  setTimeout(() => toast.classList.remove('show'), 2000);
 }
 </script>
 </body>
