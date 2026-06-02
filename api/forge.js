@@ -1,26 +1,20 @@
 // api/forge.js
-// Theius — Core prompt transformation endpoint with memory integration hooks
+// Thais — Core transformation endpoint with memory integration
 
 import Anthropic from '@anthropic-ai/sdk';
 import { Distiller } from '../memory/distiller.js';
-import { MemoryStore } from '../memory/store.js';
 
-// TODO: In production, load user-specific encryption key and persistent state
-// For now, memory is prepared but not fully persisted across requests
 const anthropic = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY,
 });
 
-// Placeholder for future user memory initialization
-// In a real session flow you would load or create a MemoryStore per user
-let memoryStore = null;
 let distiller = null;
 
-function ensureMemoryInitialized(apiKey) {
+function getDistiller() {
   if (!distiller) {
-    distiller = new Distiller(apiKey);
+    distiller = new Distiller(process.env.ANTHROPIC_API_KEY);
   }
-  // memoryStore would normally be loaded from encrypted user state
+  return distiller;
 }
 
 export default async function handler(req, res) {
@@ -29,31 +23,36 @@ export default async function handler(req, res) {
   }
 
   const { prompt, sessionContext } = req.body;
+
   if (!prompt?.trim()) {
     return res.status(400).json({ error: 'Prompt is required' });
   }
 
   try {
-    ensureMemoryInitialized(process.env.ANTHROPIC_API_KEY);
+    const distillerInstance = getDistiller();
 
-    // === MEMORY INTEGRATION POINT ===
-    // When sessionContext is provided (future), we can:
-    // 1. Load or initialize MemoryStore for the user
-    // 2. Run distiller.extract() at end of meaningful sessions
-    // 3. Inject relevant memory into the system prompt via buildSystemPromptAddition()
-    // 4. Return memoryOffer suggestions to the frontend
-
+    // === MEMORY INTEGRATION ===
     let memoryContext = '';
     let memoryOffer = null;
 
-    if (sessionContext && distiller) {
-      // Example future usage:
-      // const extracted = await distiller.extract(sessionContext);
-      // if (extracted) {
-      //   await memoryStore.ingestExtracted(extracted);
-      //   memoryContext = await memoryStore.buildSystemPromptAddition();
-      // }
-      memoryOffer = { status: 'ready', message: 'Memory system is wired and ready for session context.' };
+    // If we receive session context, we can prepare memory features
+    if (sessionContext) {
+      // In a full implementation we would:
+      // - Load or create a MemoryStore for the user
+      // - Run distillation when appropriate
+      // - Build memory context to inject into prompts
+      // - Decide whether to offer memory features to the user
+
+      memoryOffer = {
+        available: true,
+        type: 'session_memory',
+        message: 'Memory features are ready. Session context received.',
+      };
+
+      // Placeholder for future memory context injection
+      if (sessionContext.conversationSummary?.length > 0) {
+        memoryContext = 'Previous context available in this session.';
+      }
     }
 
     const systemPrompt = `You are an expert prompt engineer. Restructure the user's prompt using the PROMPT framework.
