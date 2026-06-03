@@ -537,7 +537,7 @@
         return;
       }
       const { error } = await sb.auth.resetPasswordForEmail(email, {
-        redirectTo: `${window.location.origin}/signin`,
+        redirectTo: `${window.location.origin}/reset-password`,
       });
       if (error) showAlert(error.message);
       else showAlert('Password reset email sent. Check your inbox.', 'success');
