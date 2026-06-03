@@ -172,12 +172,22 @@ async function convertPrompt() {
   document.getElementById('outputSection').classList.remove('visible');
 
   // Basic session context for memory system (expand this as the app grows into full sessions)
-  const sessionContext = {
-    turnCount: 1,
-    conversationSummary: [raw],
-    currentProject: null,
-    currentTask: null
-  };
+  // Get Supabase session for user identity
+const { createClient } = supabase;
+const sb = createClient(
+  'https://czubtmjnjhikvfotcdug.supabase.co',
+  'YOUR_FULL_ANON_KEY_HERE'
+);
+const { data: { session } } = await sb.auth.getSession();
+const userId = session?.user?.id || 'anonymous';
+
+const sessionContext = {
+  userId,
+  turnCount: 1,
+  conversationSummary: [raw],
+  currentProject: null,
+  currentTask: null
+};
 
   try {
     const response = await fetch("/api/forge", {
