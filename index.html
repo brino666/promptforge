@@ -672,7 +672,7 @@ let chatUserId = 'anonymous';
     const { createClient } = supabase;
     const sb = createClient(
       'https://czubtmjnjhikvfotcdug.supabase.co',
-      'YOUR_FULL_ANON_KEY_HERE'
+      'sb_publishable_NTMVggZSl6xG4SS3Q0yr5Q_Sx8NVHEW'
     );
     const { data: { session } } = await sb.auth.getSession();
     if (session?.user?.id) chatUserId = session.user.id;
