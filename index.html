@@ -99,27 +99,311 @@
   .error-msg.visible { display: block; }
 
   .divider { border: none; border-top: 1px solid var(--border); margin: 8px 0 28px; }
+
+<style-addition>
+
+/* ── Mode toggle ─────────────────────────────────────────── */
+.mode-toggle {
+  display: flex;
+  gap: 6px;
+  margin: 20px 0 0;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 4px;
+  width: fit-content;
+}
+
+.mode-btn {
+  padding: 8px 18px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: all .15s;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.mode-btn.active {
+  background: var(--accent);
+  color: #0a0a0a;
+  font-weight: 500;
+}
+
+.mode-btn:not(.active):hover {
+  color: var(--text);
+}
+
+/* ── Chat interface ──────────────────────────────────────── */
+.chat-section {
+  display: none;
+  flex-direction: column;
+  height: calc(100vh - 280px);
+  min-height: 400px;
+}
+
+.chat-section.visible {
+  display: flex;
+}
+
+/* Workflow badge */
+.workflow-badge {
+  display: none;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  background: rgba(232,255,71,.08);
+  border: 1px solid rgba(232,255,71,.2);
+  border-radius: 100px;
+  font-size: 11px;
+  color: var(--accent);
+  letter-spacing: .06em;
+  margin-bottom: 16px;
+  width: fit-content;
+  cursor: pointer;
+}
+
+.workflow-badge.visible { display: flex; }
+.workflow-badge:hover { background: rgba(232,255,71,.14); }
+
+/* Workflow confirmation prompt */
+.workflow-confirm {
+  display: none;
+  padding: 16px 20px;
+  background: var(--surface);
+  border: 1px solid rgba(232,255,71,.25);
+  border-radius: 10px;
+  margin-bottom: 16px;
+  animation: fadeUp .2s ease;
+}
+
+.workflow-confirm.visible { display: block; }
+
+.workflow-confirm-text {
+  font-size: 13px;
+  color: var(--text);
+  margin-bottom: 12px;
+  line-height: 1.6;
+}
+
+.workflow-confirm-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.wf-yes, .wf-no {
+  padding: 7px 16px;
+  border-radius: 6px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: .06em;
+  cursor: pointer;
+  border: none;
+  transition: opacity .15s;
+}
+
+.wf-yes {
+  background: var(--accent);
+  color: #0a0a0a;
+  font-weight: 500;
+}
+
+.wf-no {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--muted);
+}
+
+.wf-yes:hover, .wf-no:hover { opacity: .8; }
+
+/* Messages */
+.chat-messages {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+}
+
+.chat-messages::-webkit-scrollbar { width: 4px; }
+.chat-messages::-webkit-scrollbar-track { background: transparent; }
+.chat-messages::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+.chat-message {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  animation: fadeUp .2s ease;
+  max-width: 88%;
+}
+
+@keyframes fadeUp {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.chat-message.user { align-self: flex-end; align-items: flex-end; }
+.chat-message.assistant { align-self: flex-start; align-items: flex-start; }
+
+.message-bubble {
+  padding: 12px 16px;
+  border-radius: 12px;
+  font-size: 14px;
+  line-height: 1.65;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.user .message-bubble {
+  background: var(--accent);
+  color: #0a0a0a;
+  border-bottom-right-radius: 4px;
+}
+
+.assistant .message-bubble {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-bottom-left-radius: 4px;
+}
+
+.message-meta {
+  font-size: 10px;
+  color: var(--muted);
+  letter-spacing: .04em;
+  padding: 0 4px;
+}
+
+/* Typing indicator */
+.typing-indicator {
+  display: none;
+  align-self: flex-start;
+  padding: 12px 16px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  border-bottom-left-radius: 4px;
+  gap: 4px;
+  align-items: center;
+}
+
+.typing-indicator.visible { display: flex; }
+
+.typing-dot {
+  width: 6px;
+  height: 6px;
+  background: var(--muted);
+  border-radius: 50%;
+  animation: typingBounce 1.2s infinite;
+}
+
+.typing-dot:nth-child(2) { animation-delay: .2s; }
+.typing-dot:nth-child(3) { animation-delay: .4s; }
+
+@keyframes typingBounce {
+  0%, 60%, 100% { transform: translateY(0); opacity: .4; }
+  30% { transform: translateY(-4px); opacity: 1; }
+}
+
+/* Chat input */
+.chat-input-wrap {
+  display: flex;
+  gap: 10px;
+  align-items: flex-end;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+  margin-top: 8px;
+}
+
+.chat-input {
+  flex: 1;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 14px;
+  line-height: 1.5;
+  padding: 11px 14px;
+  resize: none;
+  outline: none;
+  min-height: 44px;
+  max-height: 160px;
+  transition: border-color .15s;
+  overflow-y: auto;
+}
+
+.chat-input:focus { border-color: var(--accent); }
+.chat-input::placeholder { color: var(--muted); }
+
+.chat-send-btn {
+  width: 44px;
+  height: 44px;
+  background: var(--accent);
+  border: none;
+  border-radius: 10px;
+  color: #0a0a0a;
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  transition: opacity .15s, transform .12s;
+}
+
+.chat-send-btn:hover:not(:disabled) { opacity: .88; transform: translateY(-1px); }
+.chat-send-btn:disabled { opacity: .4; cursor: not-allowed; }
+
+.chat-hint {
+  font-size: 10px;
+  color: var(--muted);
+  text-align: center;
+  margin-top: 8px;
+  letter-spacing: .03em;
+}
+
+</style-addition>
 </style>
 </head>
 <body>
 
 <div class="container">
   <header>
-    <div class="logo">
-      <span class="logo-text">v1.0 — AI Prompt Optimizer</span>
-    </div>
-    <h1>TH<span style="color:var(--accent)">AI</span>S</h1>
-    <p class="tagline">input a prompt, question or statement</p>
+  <div class="logo">
+    <span class="logo-text">v1.0 — AI Prompt Optimizer</span>
+  </div>
+  <h1>TH<span style="color:var(--accent)">AI</span>S</h1>
+  <p class="tagline">input a prompt, question or statement</p>
 
-    <div style="display:flex;gap:10px;margin-top:16px;align-items:center;">
-      <a href="/signin" style="padding:8px 18px;border:1px solid #2a2a2a;border-radius:6px;color:#999;font-family:'IBM Plex Mono',monospace;font-size:12px;text-decoration:none;">sign in</a>
-      <script async src="https://js.stripe.com/v3/buy-button.js"></script>
-<stripe-buy-button
-  buy-button-id="buy_btn_1TeN9ZGY4uogKpGBcfcHs1Gw"
-  publishable-key="pk_live_51Tb9ckGY4uogKpGBEI5N848ggCSXMz31dPCEztr7aLi5nf3SBvBQmCkSC6pwGKj2kK5u0ydUfgGURPFUuVDT2Hjo00nuXwDmWI"
-></stripe-buy-button>
-    </div>
-  </header>
+  <div style="display:flex;gap:10px;margin-top:16px;align-items:center;">
+    <a href="/signin" style="padding:8px 18px;border:1px solid #2a2a2a;border-radius:6px;color:#999;font-family:'IBM Plex Mono',monospace;font-size:12px;text-decoration:none;">sign in</a>
+    <script async src="https://js.stripe.com/v3/buy-button.js"></script>
+    <stripe-buy-button
+      buy-button-id="buy_btn_1TeN9ZGY4uogKpGBcfcHs1Gw"
+      publishable-key="pk_live_51Tb9ckGY4uogKpGBEI5N848ggCSXMz31dPCEztr7aLi5nf3SBvBQmCkSC6pwGKj2kK5u0ydUfgGURPFUuVDT2Hjo00nuXwDmWI"
+    ></stripe-buy-button>
+  </div>
+
+  <!-- Mode toggle -->
+  <div class="mode-toggle">
+    <button class="mode-btn active" id="forgeBtn" onclick="setMode('forge')">
+      ⚡ Forge
+    </button>
+    <button class="mode-btn" id="chatBtn" onclick="setMode('chat')">
+      💬 Chat
+    </button>
+  </div>
+</header>
+
 
   <section class="input-section">
     <div class="section-label">Input:</div>
@@ -130,6 +414,61 @@
       <span id="btnText">Forge It →</span>
     </button>
   </section>
+ 
+
+<!-- Chat mode -->
+<div class="chat-section" id="chatSection">
+
+  <!-- Workflow badge (shown after confirmation) -->
+  <div class="workflow-badge" id="workflowBadge" onclick="resetWorkflow()">
+    <span id="workflowIcon"></span>
+    <span id="workflowLabel"></span>
+    <span style="opacity:.5;font-size:10px;">× change</span>
+  </div>
+
+  <!-- Workflow confirmation prompt -->
+  <div class="workflow-confirm" id="workflowConfirm">
+    <p class="workflow-confirm-text" id="workflowConfirmText"></p>
+    <div class="workflow-confirm-actions">
+      <button class="wf-yes" onclick="confirmWorkflow()">Yes, that's right</button>
+      <button class="wf-no" onclick="declineWorkflow()">Not quite</button>
+    </div>
+  </div>
+
+  <!-- Messages -->
+  <div class="chat-messages" id="chatMessages">
+    <!-- Welcome message -->
+    <div class="chat-message assistant">
+      <div class="message-bubble">What are you working on?</div>
+      <span class="message-meta">Thais</span>
+    </div>
+  </div>
+
+  <!-- Typing indicator -->
+  <div class="typing-indicator" id="typingIndicator">
+    <div class="typing-dot"></div>
+    <div class="typing-dot"></div>
+    <div class="typing-dot"></div>
+  </div>
+
+  <!-- Input -->
+  <div class="chat-input-wrap">
+    <textarea
+      class="chat-input"
+      id="chatInput"
+      placeholder="Say what's on your mind..."
+      rows="1"
+      onkeydown="handleChatKey(event)"
+      oninput="autoResizeChatInput(this)"
+    ></textarea>
+    <button class="chat-send-btn" id="chatSendBtn" onclick="sendChatMessage()">
+      <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
+        <path d="M2 9h14M9 2l7 7-7 7" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+    </button>
+  </div>
+  <p class="chat-hint">Enter to send · Shift+Enter for new line</p>
+</div>
 
   <hr class="divider">
 
@@ -290,6 +629,255 @@ function showToast(msg) {
   toast.classList.add('show');
   setTimeout(() => toast.classList.remove('show'), 2000);
 }
+
+<script-addition>
+
+// ── Mode switching ────────────────────────────────────────────
+function setMode(mode) {
+  const forgeSection = document.querySelector('.input-section');
+  const outputSection = document.getElementById('outputSection');
+  const chatSection = document.getElementById('chatSection');
+  const forgeBtn = document.getElementById('forgeBtn');
+  const chatBtn = document.getElementById('chatBtn');
+
+  if (mode === 'forge') {
+    forgeSection.style.display = 'block';
+    chatSection.classList.remove('visible');
+    forgeBtn.classList.add('active');
+    chatBtn.classList.remove('active');
+    // Show output if it was visible
+    if (parsedBlocks && Object.keys(parsedBlocks).length > 0) {
+      outputSection.classList.add('visible');
+    }
+  } else {
+    forgeSection.style.display = 'none';
+    outputSection.classList.remove('visible');
+    chatSection.classList.add('visible');
+    forgeBtn.classList.remove('active');
+    chatBtn.classList.add('active');
+    // Focus chat input
+    setTimeout(() => document.getElementById('chatInput').focus(), 100);
+  }
+}
+
+// ── Chat state ────────────────────────────────────────────────
+let chatHistory = [];
+let pendingWorkflow = null;
+let activeWorkflow = null;
+let chatUserId = 'anonymous';
+
+// Get userId from Supabase session if available
+(async () => {
+  try {
+    const { createClient } = supabase;
+    const sb = createClient(
+      'https://czubtmjnjhikvfotcdug.supabase.co',
+      'YOUR_FULL_ANON_KEY_HERE'
+    );
+    const { data: { session } } = await sb.auth.getSession();
+    if (session?.user?.id) chatUserId = session.user.id;
+  } catch { /* use anonymous */ }
+})();
+
+// ── Send message ──────────────────────────────────────────────
+async function sendChatMessage() {
+  const input = document.getElementById('chatInput');
+  const message = input.value.trim();
+  if (!message) return;
+
+  // Add user message to UI
+  addMessageToUI('user', message);
+  input.value = '';
+  autoResizeChatInput(input);
+  chatHistory.push({ role: 'user', content: message });
+
+  // Disable input while waiting
+  setChatLoading(true);
+
+  try {
+    const body = {
+      message,
+      history: chatHistory.slice(0, -1), // exclude the message we just added
+      userId: chatUserId,
+    };
+
+    if (activeWorkflow) body.workflowConfirmed = activeWorkflow.id;
+    if (pendingWorkflow === 'declined') body.workflowDeclined = true;
+
+    const res = await fetch('/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Request failed');
+
+    if (data.type === 'workflow_suggestion') {
+      // Show collaborative confirmation
+      pendingWorkflow = data.workflow;
+      showWorkflowConfirm(data.workflow, data.message);
+      // Remove the user message from history temporarily
+      chatHistory.pop();
+    } else {
+      // Regular message response
+      addMessageToUI('assistant', data.message);
+      chatHistory.push({ role: 'assistant', content: data.message });
+      if (data.workflow && !activeWorkflow) {
+        activeWorkflow = data.workflow;
+        updateWorkflowBadge(data.workflow);
+      }
+    }
+  } catch (err) {
+    addMessageToUI('assistant', 'Something went wrong. Please try again.');
+    chatHistory.pop(); // remove failed user message
+  } finally {
+    setChatLoading(false);
+  }
+}
+
+// ── Workflow confirmation ─────────────────────────────────────
+function showWorkflowConfirm(workflow, message) {
+  const confirm = document.getElementById('workflowConfirm');
+  document.getElementById('workflowConfirmText').textContent =
+    `${workflow.icon} ${message}`;
+  confirm.classList.add('visible');
+}
+
+async function confirmWorkflow() {
+  const confirm = document.getElementById('workflowConfirm');
+  confirm.classList.remove('visible');
+  activeWorkflow = pendingWorkflow;
+  updateWorkflowBadge(activeWorkflow);
+
+  // Re-send the last user message with confirmed workflow
+  const lastUserMsg = chatHistory[chatHistory.length - 1];
+  if (lastUserMsg?.role === 'user') {
+    setChatLoading(true);
+    try {
+      const res = await fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          message: lastUserMsg.content,
+          history: chatHistory.slice(0, -1),
+          userId: chatUserId,
+          workflowConfirmed: activeWorkflow.id,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      addMessageToUI('assistant', data.message);
+      chatHistory.push({ role: 'assistant', content: data.message });
+    } catch (err) {
+      addMessageToUI('assistant', 'Something went wrong. Please try again.');
+    } finally {
+      setChatLoading(false);
+    }
+  }
+}
+
+function declineWorkflow() {
+  const confirm = document.getElementById('workflowConfirm');
+  confirm.classList.remove('visible');
+  pendingWorkflow = 'declined';
+  activeWorkflow = { id: 'general', label: 'General conversation', icon: '💬' };
+
+  // Re-send with declined workflow
+  const lastUserMsg = chatHistory[chatHistory.length - 1];
+  if (lastUserMsg?.role === 'user') {
+    const msg = lastUserMsg.content;
+    chatHistory.pop();
+
+    setChatLoading(true);
+    fetch('/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        message: msg,
+        history: [],
+        userId: chatUserId,
+        workflowDeclined: true,
+      }),
+    })
+    .then((r) => r.json())
+    .then((data) => {
+      chatHistory.push({ role: 'user', content: msg });
+      addMessageToUI('assistant', data.message);
+      chatHistory.push({ role: 'assistant', content: data.message });
+    })
+    .catch(() => addMessageToUI('assistant', 'Something went wrong.'))
+    .finally(() => setChatLoading(false));
+  }
+}
+
+function resetWorkflow() {
+  activeWorkflow = null;
+  pendingWorkflow = null;
+  document.getElementById('workflowBadge').classList.remove('visible');
+  // Clear history and restart
+  chatHistory = [];
+  const messages = document.getElementById('chatMessages');
+  messages.innerHTML = `
+    <div class="chat-message assistant">
+      <div class="message-bubble">What are you working on?</div>
+      <span class="message-meta">Thais</span>
+    </div>`;
+}
+
+function updateWorkflowBadge(workflow) {
+  const badge = document.getElementById('workflowBadge');
+  document.getElementById('workflowIcon').textContent = workflow.icon;
+  document.getElementById('workflowLabel').textContent = workflow.label;
+  badge.classList.add('visible');
+}
+
+// ── UI helpers ────────────────────────────────────────────────
+function addMessageToUI(role, content) {
+  const messages = document.getElementById('chatMessages');
+  const div = document.createElement('div');
+  div.className = `chat-message ${role}`;
+
+  const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  const metaLabel = role === 'user' ? 'You' : 'Thais';
+
+  div.innerHTML = `
+    <div class="message-bubble">${escapeHtml(content)}</div>
+    <span class="message-meta">${metaLabel} · ${time}</span>
+  `;
+
+  messages.appendChild(div);
+  messages.scrollTop = messages.scrollHeight;
+}
+
+function setChatLoading(loading) {
+  const btn = document.getElementById('chatSendBtn');
+  const input = document.getElementById('chatInput');
+  const typing = document.getElementById('typingIndicator');
+
+  btn.disabled = loading;
+  input.disabled = loading;
+  typing.classList.toggle('visible', loading);
+
+  if (loading) {
+    document.getElementById('chatMessages').scrollTop =
+      document.getElementById('chatMessages').scrollHeight;
+  }
+}
+
+function handleChatKey(e) {
+  if (e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault();
+    sendChatMessage();
+  }
+}
+
+function autoResizeChatInput(el) {
+  el.style.height = 'auto';
+  el.style.height = Math.min(el.scrollHeight, 160) + 'px';
+}
+
+</script-addition>
 </script>
 </body>
 </html>
