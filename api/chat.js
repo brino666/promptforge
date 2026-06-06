@@ -209,10 +209,16 @@ export default async function handler(req, res) {
     // ── Build messages ─────────────────────────────────────────────────────
     const systemPrompt = buildSystemPrompt(activeWorkflow, memoryContext);
 
-    const messages = [
-      ...history.map((m) => ({ role: m.role, content: m.content })),
-      { role: 'user', content: message },
-    ];
+    // Sanitize history — must strictly alternate roles
+const sanitized = [];
+for (const m of history) {
+  const last = sanitized[sanitized.length - 1];
+  if (!last || last.role !== m.role) sanitized.push(m);
+}
+const messages = [
+  ...sanitized.map((m) => ({ role: m.role, content: m.content })),
+  { role: 'user', content: message },
+];
 
     // ── Call Claude ────────────────────────────────────────────────────────
     const response = await anthropic.messages.create({
