@@ -371,7 +371,6 @@
   letter-spacing: .03em;
 }
 
-</style-addition>
 </style>
 </head>
 <body>
@@ -672,7 +671,7 @@ let chatUserId = 'anonymous';
     const { createClient } = supabase;
     const sb = createClient(
       'https://czubtmjnjhikvfotcdug.supabase.co',
-      'sb_publishable_NTMVggZSl6xG4SS3Q0yr5Q_Sx8NVHEW'
+      'NTMVggZSl6xG4SS3Q0yr5Q_Sx8NVHEW'
     );
     const { data: { session } } = await sb.auth.getSession();
     if (session?.user?.id) chatUserId = session.user.id;
@@ -877,7 +876,6 @@ function autoResizeChatInput(el) {
   el.style.height = Math.min(el.scrollHeight, 160) + 'px';
 }
 
-</script-addition>
 </script>
 </body>
 </html>
