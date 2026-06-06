@@ -186,7 +186,7 @@ export default async function handler(req, res) {
     let activeWorkflow = null;
     let needsConfirmation = false;
 
-    if (isFirstMessage && !workflowConfirmed && !workflowDeclined) {
+    if (false) {
       const { workflow, confidence } = detectWorkflow(message);
 
       if (workflow.id !== 'general' && confidence !== 'low') {
