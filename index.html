@@ -71,7 +71,7 @@
   .spinner.active { display: block; }
   @keyframes spin { to { transform: rotate(360deg); } }
 
-  .output-section { padding-bottom: 60px; display: none; }
+  .output-section { padding-bottom: 60px; display: none; max-height: 100vh; overflow-y: auto; }
   .output-section.visible { display: block; }
 
   .output-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 24px; padding-bottom: 16px; border-bottom: 1px solid var(--border); }
@@ -586,7 +586,7 @@ function renderOutput(data) {
 
   document.getElementById('finalPromptText').textContent = data.assembled;
   document.getElementById('outputSection').classList.add('visible');
-  document.getElementById('outputSection').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  document.getElementById('outputSection').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 }
 
 function escapeHtml(str) {
@@ -640,7 +640,8 @@ function setMode(mode) {
   if (mode === 'forge') {
     forgeSection.style.display = 'block';
     chatSection.classList.remove('visible');
-    forgeBtn.classList.add('active');
+    forgeBtn.classList.add('ac
+                           tive');
     chatBtn.classList.remove('active');
     // Show output if it was visible
     if (parsedBlocks && Object.keys(parsedBlocks).length > 0) {
