@@ -885,3 +885,122 @@ function setMode(mode) {
     // Show output if it was visible
     if (parsedBlocks && Object.keys(parsedBlocks).length > 0) {
       outputSection.c
+ks && Object.keys(parsedBlocks).length > 0) {
+      outputSection.classList.add('visible');
+    }
+  } else {
+    forgeSection.style.display = 'none';
+    outputSection.classList.remove('visible');
+    chatSection.classList.add('visible');
+    forgeBtn.classList.remove('active');
+    chatBtn.classList.add('active');
+    setTimeout(() => document.getElementById('chatInput').focus(), 100);
+  }
+}
+
+let chatHistory = [];
+let activeWorkflow = null;
+let chatUserId = 'anonymous';
+
+(async () => {
+  try {
+    const { createClient } = supabase;
+    const sb = createClient(
+      'https://czubtmjnjhikvfotcdug.supabase.co',
+      'sb_publishable_NTMVggZSl6xG4SS3Q0yr5Q_Sx8NVHEW'
+    );
+    const { data: { session } } = await sb.auth.getSession();
+    if (session?.user?.id) chatUserId = session.user.id;
+  } catch { }
+})();
+
+async function sendChatMessage() {
+  const input = document.getElementById('chatInput');
+  const message = input.value.trim();
+  if (!message) return;
+  addMessageToUI('user', message);
+  input.value = '';
+  autoResizeChatInput(input);
+  chatHistory.push({ role: 'user', content: message });
+  setChatLoading(true);
+  try {
+    const res = await fetch('/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message, history: chatHistory.slice(0, -1), userId: chatUserId }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Request failed');
+    addMessageToUI('assistant', data.message);
+    chatHistory.push({ role: 'assistant', content: data.message });
+    if (data.workflow && !activeWorkflow) {
+      activeWorkflow = data.workflow;
+      updateWorkflowBadge(data.workflow);
+    }
+  } catch (err) {
+    addMessageToUI('assistant', 'Something went wrong. Please try again.');
+    chatHistory.pop();
+  } finally {
+    setChatLoading(false);
+  }
+}
+
+function resetWorkflow() {
+  activeWorkflow = null;
+  chatHistory = [];
+  document.getElementById('workflowBadge').classList.remove('visible');
+  document.getElementById('chatMessages').innerHTML = `
+    <div class="chat-message assistant">
+      <div class="message-bubble">What are you working on?</div>
+      <span class="message-meta">Thais</span>
+    </div>`;
+}
+
+function updateWorkflowBadge(workflow) {
+  const badge = document.getElementById('workflowBadge');
+  document.getElementById('workflowIcon').textContent = workflow.icon;
+  document.getElementById('workflowLabel').textContent = workflow.label;
+  badge.classList.add('visible');
+}
+
+function addMessageToUI(role, content) {
+  const messages = document.getElementById('chatMessages');
+  const div = document.createElement('div');
+  div.className = `chat-message ${role}`;
+  const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  const metaLabel = role === 'user' ? 'You' : 'Thais';
+  div.innerHTML = `
+    <div class="message-bubble">${escapeHtml(content)}</div>
+    <span class="message-meta">${metaLabel} · ${time}</span>`;
+  messages.appendChild(div);
+  messages.scrollTop = messages.scrollHeight;
+}
+
+function setChatLoading(loading) {
+  const btn = document.getElementById('chatSendBtn');
+  const input = document.getElementById('chatInput');
+  const typing = document.getElementById('typingIndicator');
+  btn.disabled = loading;
+  input.disabled = loading;
+  typing.classList.toggle('visible', loading);
+  if (loading) {
+    document.getElementById('chatMessages').scrollTop =
+      document.getElementById('chatMessages').scrollHeight;
+  }
+}
+
+function handleChatKey(e) {
+  if (e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault();
+    sendChatMessage();
+  }
+}
+
+function autoResizeChatInput(el) {
+  el.style.height = 'auto';
+  el.style.height = Math.min(el.scrollHeight, 160) + 'px';
+}
+
+</script>
+</body>
+</html>
