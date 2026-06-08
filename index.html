@@ -1,39 +1,3 @@
-fo
-
-function escapeHtml(str) {
-  return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-}
-
-function copyToClipboard(text, msg = 'Copied to clipboard') {
-  if (navigator.clipboard && window.isSecureContext) {
-    navigator.clipboard.writeText(text).then(() => showToast(msg));
-  } else {
-    const ta = document.createElement('textarea');
-    ta.value = text;
-    ta.style.position = 'fixed';
-    ta.style.opacity = '0';
-    document.body.appendChild(ta);
-    ta.select();
-    document.execCommand('copy');
-    document.body.removeChild(ta);
-    showToast(msg);
-  }
-}
-
-function copyBlockByIndex(i) { copyToClipboard(blockValues[i]); }
-
-function copyFinal() { copyToClipboard(assembledPrompt, 'Final prompt copied'); }
-
-function copyAll() {
-  const parts = Object.entries(parsedBlocks)
-    .filter(e => e[0] !== 'assembled')
-    .map(e => `[${e[0].toUpperCase()}]\n${e[1]}`);
-  const allText = parts.join('\n\n') + '\n\n[ASSEMBLED PROMPT]\n' + assembledPrompt;
-  copyToClipboard(allText, 'All sections copied');
-}
-
-function showToast(msg) {
-  const toast = document.getElementById('toast');
   toast.textContent = msg;
   toast.classList.add('show');
   setTimeout(() => toast.classList.remove('show'), 2000);
