@@ -619,18 +619,31 @@ function updateWorkflowBadge(workflow) {
   document.getElementById('workflowBadge').classList.add('visible');
 }
 
+function renderMarkdown(text) {
+  return text
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+    .replace(/\*(.+?)\*/g, '<em>$1</em>')
+    .replace(/`(.+?)`/g, '<code style="background:#1a1a1a;padding:2px 6px;border-radius:4px;font-size:13px;">$1</code>')
+    .replace(/^(\d+)\. (.+)$/gm, '<div style="margin:4px 0;"><span style="color:var(--accent);font-weight:700;">$1.</span> $2</div>')
+    .replace(/^- (.+)$/gm, '<div style="margin:4px 0;">• $1</div>')
+    .replace(/\n\n/g, '<br><br>')
+    .replace(/\n/g, '<br>');
+}
+
 function addMessageToUI(role, content) {
   const messages = document.getElementById('chatMessages');
   const div = document.createElement('div');
   div.className = 'chat-message ' + role;
   const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   const metaLabel = role === 'user' ? 'You' : 'Thais';
+  const rendered = role === 'assistant' ? renderMarkdown(content) : escapeHtml(content);
   div.innerHTML = `
-    <div class="message-bubble">${escapeHtml(content)}</div>
+    <div class="message-bubble">${rendered}</div>
     <span class="message-meta">${metaLabel} · ${time}</span>`;
   messages.appendChild(div);
   messages.scrollTop = messages.scrollHeight;
-}
+ }
 
 function setChatLoading(loading) {
   document.getElementById('chatSendBtn').disabled = loading;
