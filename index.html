@@ -1,39 +1,3 @@
-  toast.textContent = msg;
-  toast.classList.add('show');
-  setTimeout(() => toast.classList.remove('show'), 2000);
-}
-
-
-// ── Mode switching ────────────────────────────────────────────
-function setMode(mode) {
-  const forgeSection = document.querySelector('.input-section');
-  const outputSection = document.getElementById('outputSection');
-  const chatSection = document.getElementById('chatSection');
-  const forgeBtn = document.getElementById('forgeBtn');
-  const chatBtn = document.getElementById('chatBtn');
-
-  if (mode === 'forge') {
-    forgeSection.style.display = 'block';
-    chatSection.classList.remove('visible');
-    forgeBtn.classList.add('active');
-    chatBtn.classList.remove('active');
-    // Show output if it was visible
-    if (parsedBlocks && Object.keys(parsedBlocks).length > 0) {
-      outputSection.classList.add('visible');
-    }
-      outputSection.classList.add('visible');
-    }
-  } else {
-    forgeSection.style.display = 'none';
-    outputSection.classList.remove('visible');
-    chatSection.classList.add('visible');
-    forgeBtn.classList.remove('active');
-    chatBtn.classList.add('active');
-    setTimeout(() => document.getElementById('chatInput').focus(), 100);
-  }
-}
-
-let chatHistory = [];
 let activeWorkflow = null;
 let chatUserId = 'anonymous';
 
