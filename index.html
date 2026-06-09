@@ -601,10 +601,359 @@
 <div class="toast" id="toast">Copied to clipboard</div>
 
 <script>
-// ── State ─────────────────────────────────────────────────────
+// ── State ──────────────────────────────────────────────────
 let parsedBlocks = {};
 let assembledPrompt = '';
 let blockValues = [];
 let chatHistory = [];
 let activeWorkflow = null;
-let chatUserId = 'an
+let chatUserId = 'anonymous';
+let supabaseClient = null;
+
+// ── Supabase init ─────────────────────────────────────────────
+(async () => {
+  try {
+    const { createClient } = supabase;
+    supabaseClient = createClient(
+      'https://czubtmjnjhikvfotcdug.supabase.co',
+      'sb_publishable_NTMVggZSl6xG4SS3Q0yr5Q_Sx8NVHEW'
+    );
+
+    const { data: { session } } = await supabaseClient.auth.getSession();
+    if (session?.user) {
+      setLoggedIn(session.user);
+    } else {
+      setLoggedOut();
+    }
+
+    // Listen for auth state changes
+    supabaseClient.auth.onAuthStateChange((event, session) => {
+      if (session?.user) {
+        setLoggedIn(session.user);
+      } else {
+        setLoggedOut();
+      }
+    });
+  } catch(e) {
+    setLoggedOut();
+  }
+})();
+
+function setLoggedIn(user) {
+  chatUserId = user.id;
+  const email = user.email || '';
+  const initial = email.charAt(0).toUpperCase();
+
+  document.getElementById('authLoggedOut').classList.remove('visible');
+  document.getElementById('authLoggedIn').classList.add('visible');
+  document.getElementById('accountAvatar').textContent = initial;
+  document.getElementById('accountEmail').textContent = email;
+}
+
+function setLoggedOut() {
+  chatUserId = 'anonymous';
+  document.getElementById('authLoggedOut').classList.add('visible');
+  document.getElementById('authLoggedIn').classList.remove('visible');
+}
+
+function toggleAccountMenu() {
+  document.getElementById('accountDropdown').classList.toggle('open');
+}
+
+// Close dropdown when tapping outside
+document.addEventListener('click', (e) => {
+  const wrap = document.getElementById('accountBtn');
+  const dropdown = document.getElementById('accountDropdown');
+  if (wrap && !wrap.contains(e.target)) {
+    dropdown.classList.remove('open');
+  }
+});
+
+async function handleSignOut() {
+  try {
+    if (supabaseClient) await supabaseClient.auth.signOut();
+    setLoggedOut();
+    document.getElementById('accountDropdown').classList.remove('open');
+    showToast('Signed out');
+  } catch(e) {
+    showToast('Sign out failed');
+  }
+}
+
+// ── Mode switching ────────────────────────────────────────────
+function setMode(mode) {
+  const forgeSection = document.getElementById('forgeSection');
+  const outputSection = document.getElementById('outputSection');
+  const chatSection = document.getElementById('chatSection');
+  const forgeBtn = document.getElementById('forgeBtn');
+  const chatBtn = document.getElementById('chatBtn');
+
+  if (mode === 'forge') {
+    forgeSection.style.display = 'block';
+    chatSection.classList.remove('visible');
+    forgeBtn.classList.add('active');
+    chatBtn.classList.remove('active');
+    if (parsedBlocks && Object.keys(parsedBlocks).length > 0) {
+      outputSection.classList.add('visible');
+    }
+  } else {
+    forgeSection.style.display = 'none';
+    outputSection.classList.remove('visible');
+    chatSection.classList.add('visible');
+    forgeBtn.classList.remove('active');
+    chatBtn.classList.add('active');
+    setTimeout(() => document.getElementById('chatInput').focus(), 100);
+  }
+}
+
+// ── Forge ─────────────────────────────────────────────────────
+async function convertPrompt() {
+  const raw = document.getElementById('rawPrompt').value.trim();
+  if (!raw) return;
+
+  const btn = document.getElementById('convertBtn');
+  const spinner = document.getElementById('spinner');
+  const btnText = document.getElementById('btnText');
+  const errorMsg = document.getElementById('errorMsg');
+
+  btn.disabled = true;
+  spinner.classList.add('active');
+  btnText.textContent = 'Forging...';
+  errorMsg.classList.remove('visible');
+  document.getElementById('outputSection').classList.remove('visible');
+
+  const sessionContext = {
+    userId: chatUserId,
+    turnCount: 1,
+    conversationSummary: [raw],
+    currentProject: null,
+    currentTask: null
+  };
+
+  try {
+    const response = await fetch('/api/forge', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompt: raw, sessionContext })
+    });
+
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || 'Request failed');
+
+    const rawText = data.content[0].text;
+    const clean = rawText.replace(/```json|```/g, '').trim();
+    const parsed = JSON.parse(clean);
+
+    parsedBlocks = parsed;
+    assembledPrompt = parsed.assembled;
+    renderOutput(parsed);
+  } catch (err) {
+    errorMsg.textContent = 'Something went wrong. Please try again.';
+    errorMsg.classList.add('visible');
+  } finally {
+    btn.disabled = false;
+    spinner.classList.remove('active');
+    btnText.textContent = 'Forge It →';
+  }
+}
+
+function renderOutput(data) {
+  const blocks = [
+    { letter: 'P', name: 'Position',         value: data.position  },
+    { letter: 'R', name: 'Relevant Context', value: data.context   },
+    { letter: 'O', name: 'Objective',         value: data.objective },
+    { letter: 'M', name: 'Manner',            value: data.manner    },
+    { letter: 'P', name: 'Purpose / Audience',value: data.audience  },
+    { letter: 'T', name: 'Target Format',     value: data.format    },
+    { letter: 'F', name: 'Forge',             value: data.forge     },
+  ];
+
+  const container = document.getElementById('promptBlocks');
+  container.innerHTML = '';
+  blockValues = blocks.map(b => b.value);
+
+  blocks.forEach((block, i) => {
+    const el = document.createElement('div');
+    el.className = 'prompt-block';
+    el.innerHTML = `
+      <div class="block-letter">${block.letter}</div>
+      <div class="block-content">
+        <div class="block-name">${block.name}</div>
+        <div class="block-text">${escapeHtml(block.value)}</div>
+      </div>
+      <button class="block-copy" onclick="copyBlockByIndex(${i})">⎘</button>`;
+    container.appendChild(el);
+  });
+
+  document.getElementById('finalPromptText').textContent = data.assembled;
+  document.getElementById('outputSection').classList.add('visible');
+  document.getElementById('outputSection').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+// ── Chat ──────────────────────────────────────────────────────
+async function sendChatMessage() {
+  const input = document.getElementById('chatInput');
+  const message = input.value.trim();
+  if (!message) return;
+
+  addMessageToUI('user', message);
+  input.value = '';
+  autoResizeChatInput(input);
+  chatHistory.push({ role: 'user', content: message });
+  setChatLoading(true);
+
+  try {
+    const res = await fetch('/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        message,
+        history: chatHistory.slice(0, -1),
+        userId: chatUserId
+      }),
+    });
+
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Request failed');
+
+    addMessageToUI('assistant', data.message);
+    chatHistory.push({ role: 'assistant', content: data.message });
+
+    if (data.workflow && !activeWorkflow) {
+      activeWorkflow = data.workflow;
+      updateWorkflowBadge(data.workflow);
+    }
+  } catch (err) {
+    addMessageToUI('assistant', 'Something went wrong. Please try again.');
+    chatHistory.pop();
+  } finally {
+    setChatLoading(false);
+  }
+}
+
+function resetChat() {
+  activeWorkflow = null;
+  chatHistory = [];
+  document.getElementById('workflowBadge').classList.remove('visible');
+  document.getElementById('workflowConfirm').classList.remove('visible');
+  document.getElementById('chatMessages').innerHTML = `
+    <div class="chat-message assistant">
+      <div class="message-bubble">What are you working on?</div>
+      <span class="message-meta">Thais</span>
+    </div>`;
+}
+
+function confirmWorkflow() {
+  document.getElementById('workflowConfirm').classList.remove('visible');
+}
+
+function declineWorkflow() {
+  document.getElementById('workflowConfirm').classList.remove('visible');
+}
+
+function updateWorkflowBadge(workflow) {
+  document.getElementById('workflowIcon').textContent = workflow.icon || '';
+  document.getElementById('workflowLabel').textContent = workflow.label || '';
+  document.getElementById('workflowBadge').classList.add('visible');
+}
+
+function addMessageToUI(role, content) {
+  const messages = document.getElementById('chatMessages');
+  const div = document.createElement('div');
+  div.className = 'chat-message ' + role;
+  const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  const metaLabel = role === 'user' ? 'You' : 'Thais';
+  const rendered = role === 'assistant' ? renderMarkdown(content) : escapeHtml(content);
+  div.innerHTML = `
+    <div class="message-bubble">${rendered}</div>
+    <span class="message-meta">${metaLabel} · ${time}</span>`;
+  messages.appendChild(div);
+  messages.scrollTop = messages.scrollHeight;
+}
+
+function renderMarkdown(text) {
+  return text
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+    .replace(/\*(.+?)\*/g, '<em>$1</em>')
+    .replace(/`(.+?)`/g, '<code style="background:#1a1a1a;padding:2px 6px;border-radius:4px;font-size:13px;">$1</code>')
+    .replace(/^(\d+)\. (.+)$/gm, '<div style="margin:4px 0;"><span style="color:var(--accent);font-weight:700;">$1.</span> $2</div>')
+    .replace(/^- (.+)$/gm, '<div style="margin:4px 0;">• $1</div>')
+    .replace(/\n\n/g, '<br><br>')
+    .replace(/\n/g, '<br>');
+}
+
+function setChatLoading(loading) {
+  document.getElementById('chatSendBtn').disabled = loading;
+  document.getElementById('chatInput').disabled = loading;
+  document.getElementById('typingIndicator').classList.toggle('visible', loading);
+  if (loading) {
+    const m = document.getElementById('chatMessages');
+    m.scrollTop = m.scrollHeight;
+  }
+}
+
+function handleChatKey(e) {
+  if (e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault();
+    sendChatMessage();
+  }
+}
+
+function insertNewLine() {
+  const input = document.getElementById('chatInput');
+  const start = input.selectionStart;
+  const end = input.selectionEnd;
+  input.value = input.value.slice(0, start) + '\n' + input.value.slice(end);
+  input.selectionStart = input.selectionEnd = start + 1;
+  autoResizeChatInput(input);
+  input.focus();
+}
+
+function autoResizeChatInput(el) {
+  el.style.height = 'auto';
+  el.style.height = Math.min(el.scrollHeight, 160) + 'px';
+}
+
+// ── Utilities ─────────────────────────────────────────────────
+function escapeHtml(str) {
+  return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+function copyToClipboard(text, msg) {
+  msg = msg || 'Copied to clipboard';
+  if (navigator.clipboard && window.isSecureContext) {
+    navigator.clipboard.writeText(text).then(() => showToast(msg));
+  } else {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.position = 'fixed';
+    ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand('copy');
+    document.body.removeChild(ta);
+    showToast(msg);
+  }
+}
+
+function copyBlockByIndex(i) { copyToClipboard(blockValues[i]); }
+function copyFinal() { copyToClipboard(assembledPrompt, 'Final prompt copied'); }
+
+function copyAll() {
+  const parts = Object.entries(parsedBlocks)
+    .filter(e => e[0] !== 'assembled')
+    .map(e => '[' + e[0].toUpperCase() + ']\n' + e[1]);
+  const allText = parts.join('\n\n') + '\n\n[ASSEMBLED PROMPT]\n' + assembledPrompt;
+  copyToClipboard(allText, 'All sections copied');
+}
+
+function showToast(msg) {
+  const toast = document.getElementById('toast');
+  toast.textContent = msg;
+  toast.classList.add('show');
+  setTimeout(() => toast.classList.remove('show'), 2000);
+}
+</script>
+</body>
+</html>
