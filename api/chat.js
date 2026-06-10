@@ -279,10 +279,21 @@ export default async function handler(req, res) {
 
     // ── Call Claude ────────────────────────────────────────────────────────
     const systemPrompt = buildSystemPrompt(activeWorkflow, memoryContext);
-    const messages = [
-      ...sanitized.map(m => ({ role: m.role, content: m.content })),
-      { role: 'user', content: message },
-    ];
+    const { imageBase64, imageType } = req.body;
+let userContent;
+if (imageBase64 && imageType) {
+  userContent = [
+    { type: 'image', source: { type: 'base64', media_type: imageType, data: imageBase64 } },
+    { type: 'text', text: message || 'Please analyze this image.' },
+  ];
+} else {
+  userContent = message;
+}
+
+const messages = [
+  ...sanitized.map(m => ({ role: m.role, content: m.content })),
+  { role: 'user', content: userContent },
+];
 
     const response = await anthropic.messages.create({
       model: 'claude-sonnet-4-6',
