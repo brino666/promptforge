@@ -333,7 +333,11 @@ let pendingImageType = null;
       'sb_publishable_NTMVggZSl6xG4SS3Q0yr5Q_Sx8NVHEW'
     );
     const { data: { session } } = await supabaseClient.auth.getSession();
-    if (session?.user) { setLoggedIn(session.user); } else { setLoggedOut(); }
+    if (session?.user) { 
+      setLoggedIn(session.user); 
+    } else { 
+      setTimeout(() => setLoggedOut(), 500);
+    }
     supabaseClient.auth.onAuthStateChange((event, session) => {
       if (session?.user) { setLoggedIn(session.user); } else { setLoggedOut(); }
     });
