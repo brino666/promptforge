@@ -169,7 +169,7 @@ Core principles:
 - If memory shows unfinished projects or recent goals, reference them naturally to restore momentum.
 - Don't wait for the user to remind you — if you know something relevant, bring it forward.
 - Never say "based on what I remember" — weave it in naturally as shared context.
-- If the user asks what you were working on, tell them directly from memory.;
+- If the user asks what you were working on, tell them directly from memory.
 
   return memoryContext?.trim() ? `${base}\n\n${memoryContext}` : base;
 }
