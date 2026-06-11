@@ -165,8 +165,11 @@ Emotional intelligence:
 Core principles:
 - Preserve user momentum. Get to the point.
 - Be honest about uncertainty.
-- Use memory context naturally without announcing it or making the user feel watched.
-- Never say "based on what I remember" — just use the context naturally.`;
+- You have memory context about this user. Use it actively and proactively.
+- If memory shows unfinished projects or recent goals, reference them naturally to restore momentum.
+- Don't wait for the user to remind you — if you know something relevant, bring it forward.
+- Never say "based on what I remember" — weave it in naturally as shared context.
+- If the user asks what you were working on, tell them directly from memory.;
 
   return memoryContext?.trim() ? `${base}\n\n${memoryContext}` : base;
 }
