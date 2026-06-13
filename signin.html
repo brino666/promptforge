@@ -493,7 +493,7 @@
       try {
         const { error } = await sb.auth.signInWithPassword({ email, password });
         if (error) throw error;
-        window.location.href = 'https://promptf.space';;
+      window.location.href = 'https://promptforge-n3yh.vercel.app';
       } catch (err) {
         showAlert(err.message || 'Sign in failed. Please try again.');
       } finally {
@@ -521,7 +521,7 @@
         showAlert('Account created! Signing you in…', 'success');
         setTimeout(async () => {
           await sb.auth.signInWithPassword({ email, password });
-          window.location.href = 'https://promptf.space';;
+          window.location.href = 'https://promptforge-n3yh.vercel.app';
         }, 1500);
       } catch (err) {
         showAlert(err.message || 'Sign up failed. Please try again.');
@@ -545,7 +545,7 @@
     }
 
     sb.auth.getSession().then(({ data }) => {
-      if (data.session) window.location.href = 'https://promptf.space';;
+      if (data.session) window.location.href = 'https://promptforge-n3yh.vercel.app';
     });
   </script>
 
