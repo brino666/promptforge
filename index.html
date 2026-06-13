@@ -749,7 +749,7 @@ let isListening = false;
     const { createClient } = supabase;
     supabaseClient = createClient(
       'https://czubtmjnjhikvfotcdug.supabase.co',
-      'REPLACE_WITH_YOUR_ANON_KEY'
+      'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImN6dWJ0bWpuamhpa3Zmb3RjZHVnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODAyMzMzNDUsImV4cCI6MjA5NTgwOTM0NX0.d_uPF_Y7bJV6CYwiUgkUVvaflAumVe1gT-Gcz4MNBpM'
     );
     const { data: { session } } = await supabaseClient.auth.getSession();
     if (session?.user) { setLoggedIn(session.user); } else { setLoggedOut(); }
