@@ -1330,7 +1330,7 @@ function startListening() {
   recognition.onend = function() {
     isListening = false;
     btn.classList.remove('listening');
-    input.placeholder = 'Say what's on your mind...';
+    input.placeholder = 'Say what\'s on your mind...';
     // Auto-send if we got something
     if (input.value.trim()) {
       setTimeout(function() { sendChatMessage(); }, 300);
@@ -1340,7 +1340,7 @@ function startListening() {
   recognition.onerror = function(e) {
     isListening = false;
     btn.classList.remove('listening');
-    input.placeholder = 'Say what's on your mind...';
+    input.placeholder = 'Say what\'s on your mind...';
     if (e.error !== 'no-speech') showToast('Mic error: ' + e.error);
   };
 
