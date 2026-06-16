@@ -4,6 +4,8 @@
 // FIX: Smarter memory prioritization (anchor > major > confidence > recency)
 // NEW: /api/memories?action=cleanup for one-time dedup of existing memories
 
+import { MODEL_FAST } from '../config/models.js';
+
 const SUPABASE_URL = process.env.supabase_url || process.env.SUPABASE_URL;
 const SUPABASE_SERVICE_KEY = process.env.supabase_ret_key || process.env.SUPABASE_SERVICE_ROLE_KEY;
 
@@ -211,7 +213,7 @@ async function compressMemories(userId) {
             'anthropic-version': '2023-06-01',
           },
           body: JSON.stringify({
-            model: 'claude-haiku-4-5-20251001',
+            model: MODEL_FAST,
             max_tokens: 500,
             system: COMPRESSION_SYSTEM_PROMPT,
             messages: [{

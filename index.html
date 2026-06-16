@@ -280,6 +280,22 @@
   .memory-list-view { display: none; }
   .memory-list-view.visible { display: block; }
 
+  .memory-search-input {
+    width: 100%;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    color: var(--text);
+    font-family: var(--font-mono);
+    font-size: 13px;
+    padding: 10px 14px;
+    outline: none;
+    margin-bottom: 16px;
+    transition: border-color .15s;
+  }
+  .memory-search-input:focus { border-color: var(--accent); }
+  .memory-search-input::placeholder { color: var(--muted); }
+
   .memory-loading {
     text-align: center;
     padding: 40px 0;
@@ -638,9 +654,20 @@
 
     <!-- List view -->
     <div class="memory-list-view" id="memoryListView">
+      <input
+        type="text"
+        id="memorySearchInput"
+        class="memory-search-input"
+        placeholder="Search your memories..."
+        oninput="filterMemories(this.value)"
+        style="display:none;"
+      />
       <div class="memory-loading" id="memoryLoading">Loading your memories...</div>
       <div class="memory-empty" id="memoryEmpty" style="display:none;">
         Thais hasn't learned anything about you yet.<br>Start a conversation and she'll begin building a picture of how you work.
+      </div>
+      <div class="memory-empty" id="memoryNoResults" style="display:none;">
+        No memories match "<span id="memoryNoResultsQuery"></span>".
       </div>
       <div id="memoryGroups"></div>
     </div>
@@ -833,15 +860,29 @@ function toggleMemoryInfo() {
   document.getElementById('memoryInfoBtn').classList.toggle('active', memoryInfoVisible);
 }
 
+let allMemories = [];
+
+const MEMORY_CATEGORY_ORDER = ['personal','work','plan','idea','lore'];
+const MEMORY_CATEGORY_LABELS = {
+  personal: '👤 Personal',
+  work: '🛠 Work',
+  plan: '📋 Plans & Goals',
+  idea: '💡 Ideas',
+  lore: '🌐 Lore',
+};
+
 async function loadMemories() {
   if (chatUserId === 'anonymous') {
     document.getElementById('memoryLoading').style.display = 'none';
     document.getElementById('memoryEmpty').style.display = 'block';
+    document.getElementById('memorySearchInput').style.display = 'none';
     return;
   }
 
   document.getElementById('memoryLoading').style.display = 'block';
   document.getElementById('memoryEmpty').style.display = 'none';
+  document.getElementById('memoryNoResults').style.display = 'none';
+  document.getElementById('memorySearchInput').style.display = 'none';
   document.getElementById('memoryGroups').innerHTML = '';
 
   try {
@@ -861,71 +902,94 @@ async function loadMemories() {
     const data = result.memories || [];
 
     document.getElementById('memoryLoading').style.display = 'none';
+    allMemories = data;
 
     if (!data || data.length === 0) {
       document.getElementById('memoryEmpty').style.display = 'block';
       return;
     }
 
-    // Group by category (DB column is category, not type)
-    const categoryOrder = ['personal','work','plan','idea','lore'];
-    const categoryLabels = {
-      personal: '👤 Personal',
-      work: '🛠 Work',
-      plan: '📋 Plans & Goals',
-      idea: '💡 Ideas',
-      lore: '🌐 Lore',
-    };
-
-    const grouped = {};
-    data.forEach(m => {
-      const c = m.category || 'idea';
-      if (!grouped[c]) grouped[c] = [];
-      grouped[c].push(m);
-    });
-
-    const container = document.getElementById('memoryGroups');
-
-    categoryOrder.forEach(cat => {
-      if (!grouped[cat] || grouped[cat].length === 0) return;
-      const items = grouped[cat];
-
-      const group = document.createElement('div');
-      group.className = 'memory-group';
-      group.innerHTML = `
-        <div class="memory-group-label">
-          ${categoryLabels[cat] || cat}
-          <span class="memory-group-count">${items.length}</span>
-        </div>`;
-
-      items.forEach(memory => {
-        const card = document.createElement('div');
-        card.className = 'memory-card';
-        card.id = 'memory-' + memory.id;
-        const occurrenceText = memory.occurrences > 1 ? `mentioned ${memory.occurrences}×` : 'mentioned once';
-        const anchorBadge = memory.anchor ? '<span class="confidence-badge high">⚓ anchor</span>' : '';
-        const weightBadge = memory.weight === 'major' ? '<span class="confidence-badge medium">major</span>' : '';
-        card.innerHTML = `
-          <div class="memory-card-content">${escapeHtml(memory.content)}</div>
-          <div class="memory-card-meta">
-            <div class="memory-card-tags">
-              <span class="confidence-badge ${memory.confidence}">${memory.confidence}</span>
-              ${weightBadge}
-              ${anchorBadge}
-              <span class="occurrences-badge">${occurrenceText}</span>
-            </div>
-            <button class="memory-delete-btn" onclick="deleteMemory('${memory.id}')">Delete</button>
-          </div>`;
-        group.appendChild(card);
-      });
-
-      container.appendChild(group);
-    });
+    const searchInput = document.getElementById('memorySearchInput');
+    searchInput.style.display = 'block';
+    searchInput.value = '';
+    renderMemoryGroups(allMemories);
 
   } catch(err) {
     document.getElementById('memoryLoading').style.display = 'none';
     document.getElementById('memoryGroups').innerHTML = '<p style="font-family:var(--font-mono);font-size:12px;color:#ff8888;padding:20px 0;">Failed to load memories. Please try again.</p>';
   }
+}
+
+function renderMemoryGroups(list) {
+  const container = document.getElementById('memoryGroups');
+  container.innerHTML = '';
+
+  const grouped = {};
+  list.forEach(m => {
+    const c = m.category || 'idea';
+    if (!grouped[c]) grouped[c] = [];
+    grouped[c].push(m);
+  });
+
+  MEMORY_CATEGORY_ORDER.forEach(cat => {
+    if (!grouped[cat] || grouped[cat].length === 0) return;
+    const items = grouped[cat];
+
+    const group = document.createElement('div');
+    group.className = 'memory-group';
+    group.innerHTML = `
+      <div class="memory-group-label">
+        ${MEMORY_CATEGORY_LABELS[cat] || cat}
+        <span class="memory-group-count">${items.length}</span>
+      </div>`;
+
+    items.forEach(memory => {
+      const card = document.createElement('div');
+      card.className = 'memory-card';
+      card.id = 'memory-' + memory.id;
+      const occurrenceText = memory.occurrences > 1 ? `mentioned ${memory.occurrences}×` : 'mentioned once';
+      const anchorBadge = memory.anchor ? '<span class="confidence-badge high">⚓ anchor</span>' : '';
+      const weightBadge = memory.weight === 'major' ? '<span class="confidence-badge medium">major</span>' : '';
+      card.innerHTML = `
+        <div class="memory-card-content">${escapeHtml(memory.content)}</div>
+        <div class="memory-card-meta">
+          <div class="memory-card-tags">
+            <span class="confidence-badge ${memory.confidence}">${memory.confidence}</span>
+            ${weightBadge}
+            ${anchorBadge}
+            <span class="occurrences-badge">${occurrenceText}</span>
+          </div>
+          <button class="memory-delete-btn" onclick="deleteMemory('${memory.id}')">Delete</button>
+        </div>`;
+      group.appendChild(card);
+    });
+
+    container.appendChild(group);
+  });
+}
+
+function filterMemories(query) {
+  const trimmed = query.trim().toLowerCase();
+  document.getElementById('memoryNoResults').style.display = 'none';
+
+  if (!trimmed) {
+    renderMemoryGroups(allMemories);
+    return;
+  }
+
+  const matches = allMemories.filter(m =>
+    (m.content || '').toLowerCase().includes(trimmed) ||
+    (m.category || '').toLowerCase().includes(trimmed)
+  );
+
+  if (matches.length === 0) {
+    document.getElementById('memoryGroups').innerHTML = '';
+    document.getElementById('memoryNoResultsQuery').textContent = query.trim();
+    document.getElementById('memoryNoResults').style.display = 'block';
+    return;
+  }
+
+  renderMemoryGroups(matches);
 }
 
 async function deleteMemory(id) {
@@ -943,6 +1007,7 @@ async function deleteMemory(id) {
     });
 
     if (!res.ok) throw new Error('Delete failed');
+    allMemories = allMemories.filter(m => m.id !== id);
     const card = document.getElementById('memory-' + id);
     if (card) {
       card.style.opacity = '0';
@@ -1132,7 +1197,7 @@ function addMessageToUI(role, content, imageDataUrl) {
     ? '<button class="speak-btn" onclick="speakText(' + JSON.stringify(content) + ')" title="Read aloud">🔊</button>'
     : '';
   const copyBtn = role === 'assistant'
-    ? '<button class="speak-btn" onclick="copyToClipboard(' + JSON.stringify(content) + ', 'Copied')" title="Copy response">⎘</button>'
+    ? '<button class="speak-btn" onclick="copyToClipboard(' + JSON.stringify(content) + ', ' + JSON.stringify('Copied') + ')" title="Copy response">⎘</button>'
     : '';
   div.innerHTML = '<div class="message-bubble">' + imgHtml + rendered + '</div><span class="message-meta">' + metaLabel + ' · ' + time + ' ' + speakBtn + copyBtn + '</span>';
   messages.appendChild(div);

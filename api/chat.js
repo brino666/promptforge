@@ -3,6 +3,7 @@
 // With web search capability via Brave Search API
 
 import Anthropic from '@anthropic-ai/sdk';
+import { MODEL_MAIN, MODEL_FAST } from '../config/models.js';
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
@@ -145,7 +146,7 @@ async function shouldSearch(message, memoryContext, currentDateTime) {
     ].join('\n');
 
     const check = await anthropic.messages.create({
-      model: 'claude-haiku-4-5-20251001',
+      model: MODEL_FAST,
       max_tokens: 10,
       messages: [{ role: 'user', content: checkPrompt }],
     });
@@ -226,6 +227,9 @@ async function getNextSequence(userId) {
   }
 }
 
+const MEMORY_FETCH_LIMIT = 300;
+const MEMORY_INJECT_LIMIT = 120;
+
 async function loadMemory(userId) {
   try {
     // Fetch more than we need, then prioritize smartly
@@ -233,9 +237,9 @@ async function loadMemory(userId) {
       '/memories?user_id=eq.' + encodeURIComponent(userId) +
       '&superseded=eq.false' +
       '&order=anchor.desc,updated_at.desc' +
-      '&limit=200'
+      '&limit=' + MEMORY_FETCH_LIMIT
     );
-    // Score and return best 60 for context injection
+    // Score and return best MEMORY_INJECT_LIMIT for context injection
     // anchor > major weight > high confidence > stated > recent > occurrences
     const scored = rows.slice().sort(function(a, b) {
       function score(m) {
@@ -245,6 +249,7 @@ async function loadMemory(userId) {
         if (m.confidence === 'high') s += 20;
         if (m.confidence === 'medium') s += 10;
         if (m.source === 'stated') s += 5;
+        if (m.source === 'synthesized') s += 15;
         const age = Date.now() - new Date(m.updated_at).getTime();
         const daysOld = age / (1000 * 60 * 60 * 24);
         if (daysOld < 7) s += 15;
@@ -254,7 +259,7 @@ async function loadMemory(userId) {
       }
       return score(b) - score(a);
     });
-    return scored.slice(0, 60);
+    return scored.slice(0, MEMORY_INJECT_LIMIT);
   } catch (err) {
     console.error('[memory load error]', err.message);
     return [];
@@ -291,7 +296,7 @@ async function upsertMemory(userId, entry, sequence) {
         }).join('\n');
 
         const dupCheck = await anthropic.messages.create({
-          model: 'claude-haiku-4-5-20251001',
+          model: MODEL_FAST,
           max_tokens: 20,
           messages: [{
             role: 'user',
@@ -396,10 +401,12 @@ function buildMemoryContext(memories) {
   const sevenDays = 7 * 24 * 60 * 60 * 1000;
   const lines = [];
 
+  const shortId = function(m) { return m.id ? String(m.id).slice(0, 8) : '????????'; };
+
   const anchors = memories.filter(function(m) { return m.anchor; });
   if (anchors.length > 0) {
     lines.push('ANCHOR POINTS:');
-    anchors.forEach(function(m) { lines.push('- ' + m.content); });
+    anchors.forEach(function(m) { lines.push('- [' + shortId(m) + '] ' + m.content); });
     lines.push('');
   }
 
@@ -421,13 +428,13 @@ function buildMemoryContext(memories) {
     const ordered = major.concat(minor);
 
     lines.push(categoryLabels[cat] + ':');
-    ordered.slice(0, 8).forEach(function(m) {
+    ordered.slice(0, 20).forEach(function(m) {
       const age = now - new Date(m.updated_at).getTime();
       const isOld = age > sevenDays;
-      const sourceFlag = m.source === 'inferred' ? ' [inferred]' : '';
+      const sourceFlag = m.source === 'inferred' ? ' [inferred]' : m.source === 'synthesized' ? ' [synthesized]' : '';
       const ageFlag = isOld ? ' [older]' : '';
       const weightFlag = m.weight === 'major' ? ' [major]' : '';
-      lines.push('- ' + m.content + sourceFlag + ageFlag + weightFlag);
+      lines.push('- [' + shortId(m) + '] ' + m.content + sourceFlag + ageFlag + weightFlag);
     });
     lines.push('');
   });
@@ -507,10 +514,21 @@ function buildSystemPrompt(workflow, memoryContext, searchContext, currentDateTi
     '- Use memory context actively and specifically',
     '- Anchor points are orientation -- pick up from them naturally',
     '- Items marked [inferred] -- hold with appropriate uncertainty',
+    '- Items marked [synthesized] -- a compressed summary of several older memories',
     '- Items marked [older] -- may have been superseded, hold lightly',
     '- Items marked [major] -- weight these more heavily',
-    '- Never say "based on what I remember" -- just speak as someone who knows',
+    '- Never volunteer "based on what I remember" -- just speak as someone who knows',
     '- Memory should feel like continuity, not surveillance',
+    '- EXCEPTION: if the user directly asks why you said something, how you know it,',
+    '  or where it came from, answer honestly and specifically. Say whether it was',
+    '  something they told you directly, something you inferred, or a synthesized',
+    '  summary of older memories, and how recent or certain it is. This is the one',
+    '  case where breaking the "just speak as someone who knows" rule is correct --',
+    '  transparency on request matters more than seamlessness in that moment.',
+    '- Each memory item in your context is tagged with a short id like [a1b2c3d4].',
+    '  These ids are for your own reference only -- never read them aloud or print',
+    '  them in a normal response. If the user asks which memory something came from,',
+    '  describe its content/category plainly; do not recite the raw id.',
     '',
     'PERSONALITY:',
     '- Direct, warm, unhurried',
@@ -577,7 +595,7 @@ async function extractAndStoreMemory(userId, userMessage, assistantMessage, conv
     ].join('\n');
 
     const response = await anthropic.messages.create({
-      model: 'claude-sonnet-4-6',
+      model: MODEL_MAIN,
       max_tokens: 800,
       messages: [{ role: 'user', content: extractionPrompt }],
     });
@@ -685,7 +703,7 @@ export default async function handler(req, res) {
       // Extract a clean search query -- don't send raw conversational message to Brave
       try {
         const queryExtract = await anthropic.messages.create({
-          model: 'claude-haiku-4-5-20251001',
+          model: MODEL_FAST,
           max_tokens: 30,
           messages: [{
             role: 'user',
@@ -743,7 +761,7 @@ export default async function handler(req, res) {
     const systemPrompt = buildSystemPrompt(activeWorkflow, memoryContext, searchContext, currentDateTime, diagnosticContext);
 
     const response = await anthropic.messages.create({
-      model: 'claude-sonnet-4-6',
+      model: MODEL_MAIN,
       max_tokens: 2000,
       system: systemPrompt,
       messages: messages,
