@@ -11,7 +11,7 @@ const SUPABASE_SERVICE_KEY = process.env.supabase_ret_key || process.env.SUPABAS
 const BRAVE_KEY = process.env.BRAVE_SEARCH_KEY;
 const BASE_URL = process.env.VERCEL_URL
   ? 'https://' + process.env.VERCEL_URL
-  : 'https://promptforge-n3yh.vercel.app';
+  : process.env.BASE_URL || 'https://thais.ai';
 
 // -- Workflow definitions ---------------------------------------------
 
