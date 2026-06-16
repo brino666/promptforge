@@ -495,7 +495,7 @@
         if (!data.session) throw new Error('Sign in failed — no session returned.');
         // Small delay to let Supabase fully persist the session before redirect
         await new Promise(resolve => setTimeout(resolve, 200));
-        window.location.href = 'https://promptforge-n3yh.vercel.app/';
+        window.location.href = window.location.origin + '/';
       } catch (err) {
         showAlert(err.message || 'Sign in failed. Please try again.');
       } finally {
@@ -523,7 +523,7 @@
         showAlert('Account created! Signing you in…', 'success');
         setTimeout(async () => {
           await sb.auth.signInWithPassword({ email, password });
-          window.location.href = 'https://promptforge-n3yh.vercel.app/';
+          window.location.href = window.location.origin + '/';
         }, 1500);
       } catch (err) {
         showAlert(err.message || 'Sign up failed. Please try again.');
@@ -553,7 +553,7 @@
       const expiresAt = data.session.expires_at;
       const now = Math.floor(Date.now() / 1000);
       if (expiresAt && expiresAt > now) {
-        window.location.href = 'https://promptforge-n3yh.vercel.app/';
+        window.location.href = window.location.origin + '/';
       } else {
         // Session exists but expired -- clear it and stay on signin
         sb.auth.signOut();
