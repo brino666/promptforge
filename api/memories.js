@@ -5,6 +5,7 @@
 // NEW: /api/memories?action=cleanup for one-time dedup of existing memories
 
 import { MODEL_FAST } from '../config/models.js';
+import { scoreEntry, decideTier } from '../memory/scorer.js';
 
 const SUPABASE_URL = process.env.supabase_url || process.env.SUPABASE_URL;
 const SUPABASE_SERVICE_KEY = process.env.supabase_ret_key || process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -328,8 +329,14 @@ export default async function handler(req, res) {
       // Apply smart prioritization — show top 150 in panel
       const memories = prioritizeMemories(all, 150);
 
+      // Tag each memory with its Constitution memory tier (active/working/knowledge/archive),
+      // computed live so the user can see why a memory is weighted the way it is.
+      const tagged = memories.map(function(m) {
+        return Object.assign({}, m, { tier: decideTier(scoreEntry(m), m) });
+      });
+
       return res.status(200).json({
-        memories,
+        memories: tagged,
         total: all.length,
       });
     } catch (err) {

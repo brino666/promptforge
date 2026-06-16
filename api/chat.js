@@ -725,14 +725,17 @@ export default async function handler(req, res) {
       }
     }
 
-    // Detect workflow
+    // Detect workflow. A workflow is only "active" (changes how Thais responds)
+    // once the user has confirmed it — detection alone just surfaces a suggestion,
+    // per Constitution Principle 1 (User Agency Above Automation).
     let activeWorkflow = WORKFLOWS.general;
+    let suggestedWorkflow = null;
     if (workflowConfirmed) {
       activeWorkflow = WORKFLOWS[workflowConfirmed] || WORKFLOWS.general;
     } else if (!workflowDeclined && history.length === 0) {
       const detected = detectWorkflow(message);
       if (detected.workflow.id !== 'general' && detected.confidence === 'high') {
-        activeWorkflow = detected.workflow;
+        suggestedWorkflow = detected.workflow;
       }
     }
 
@@ -784,6 +787,7 @@ export default async function handler(req, res) {
       type: 'message',
       message: assistantMessage,
       workflow: activeWorkflow,
+      suggestedWorkflow: suggestedWorkflow,
       memoryPrompt: suggestQuestion,
       searchPerformed: searchPerformed,
       searchQuery: searchQuery,

@@ -11,9 +11,11 @@ export const TIER_BUDGETS = {
 
 export const TOTAL_BUDGET = 300_000; // 300KB per user
 
-// Score thresholds
+// Score thresholds — on the same scale as scoreEntry() in scorer.js
+// (anchors alone score 1000+, so these are tuned against that range, not 0-1).
 export const SCORE_THRESHOLDS = {
-  compress: 0.3,  // below this → move to archive
-  delete:   0.1,  // below this → remove entirely
-  promote:  0.8,  // above this → promote to knowledge tier
+  active:   150, // recent, major, high-confidence, or anchored → active tier
+  promote:  80,  // synthesized/strong recurring knowledge → knowledge tier
+  compress: 30,  // everyday useful context → working tier
+  delete:   10,  // below this → archive tier (kept but deprioritized)
 };

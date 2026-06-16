@@ -28,25 +28,33 @@ export function scoreEntry(memory) {
   return Math.max(0, score);
 }
 
-export function decideTier(score) {
+// Maps a memory + its score onto the Constitution's four memory tiers:
+// active (in active use right now), working (everyday useful context),
+// knowledge (durable, synthesized understanding), archive (low-value, kept but deprioritized).
+export function decideTier(score, memory) {
+  if (memory && memory.anchor) return 'active';
+  if (score >= SCORE_THRESHOLDS.active) return 'active';
+  if (memory && memory.source === 'synthesized') return 'knowledge';
   if (score >= SCORE_THRESHOLDS.promote) return 'knowledge';
   if (score >= SCORE_THRESHOLDS.compress) return 'working';
-  if (score >= SCORE_THRESHOLDS.delete) return 'archive';
-  return 'delete';
+  return 'archive';
 }
 
 export function enforceBudget(memories, budgets) {
+  // Active-tier memories (anchors, currently-relevant) are never budget-constrained.
+  const result = [];
   const tiers = { working: [], archive: [], knowledge: [] };
 
   for (const m of memories) {
     const s = scoreEntry(m);
-    const tier = decideTier(s);
-    if (tier !== 'delete' && tiers[tier]) {
+    const tier = decideTier(s, m);
+    if (tier === 'active') {
+      result.push({ ...m, _score: s });
+    } else {
       tiers[tier].push({ ...m, _score: s });
     }
   }
 
-  const result = [];
   for (const [tier, items] of Object.entries(tiers)) {
     const budget = budgets[tier] || 0;
     let size = 0;

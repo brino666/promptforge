@@ -758,6 +758,9 @@ let assembledPrompt = '';
 let blockValues = [];
 let chatHistory = [];
 let activeWorkflow = null;
+let pendingWorkflow = null;
+let workflowConfirmedId = null;
+let workflowDeclinedThisChat = false;
 let chatUserId = 'anonymous';
 let supabaseClient = null;
 let pendingImageBase64 = null;
@@ -950,6 +953,8 @@ function renderMemoryGroups(list) {
       const occurrenceText = memory.occurrences > 1 ? `mentioned ${memory.occurrences}×` : 'mentioned once';
       const anchorBadge = memory.anchor ? '<span class="confidence-badge high">⚓ anchor</span>' : '';
       const weightBadge = memory.weight === 'major' ? '<span class="confidence-badge medium">major</span>' : '';
+      const tierLabels = { active: '🟢 active', knowledge: '🔵 knowledge', working: '🟡 working', archive: '⚪ archive' };
+      const tierBadge = memory.tier ? `<span class="occurrences-badge" title="Memory tier">${tierLabels[memory.tier] || memory.tier}</span>` : '';
       card.innerHTML = `
         <div class="memory-card-content">${escapeHtml(memory.content)}</div>
         <div class="memory-card-meta">
@@ -957,6 +962,7 @@ function renderMemoryGroups(list) {
             <span class="confidence-badge ${memory.confidence}">${memory.confidence}</span>
             ${weightBadge}
             ${anchorBadge}
+            ${tierBadge}
             <span class="occurrences-badge">${occurrenceText}</span>
           </div>
           <button class="memory-delete-btn" onclick="deleteMemory('${memory.id}')">Delete</button>
@@ -1146,12 +1152,19 @@ async function sendChatMessage() {
   try {
     const body = { message: message || 'Please analyze this image.', history: chatHistory.slice(0, -1), userId: chatUserId };
     if (imageToSend) { body.imageBase64 = imageToSend; body.imageType = imageTypeToSend; }
+    if (workflowDeclinedThisChat) body.workflowDeclined = true;
+    if (workflowConfirmedId) body.workflowConfirmed = workflowConfirmedId;
     const res = await fetch('/api/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Request failed');
     addMessageToUI('assistant', data.message);
     chatHistory.push({ role: 'assistant', content: data.message });
-    if (data.workflow && !activeWorkflow) { activeWorkflow = data.workflow; updateWorkflowBadge(data.workflow); }
+    if (data.workflow && data.workflow.id !== 'general' && !activeWorkflow) {
+      activeWorkflow = data.workflow;
+      updateWorkflowBadge(data.workflow);
+    } else if (data.suggestedWorkflow && !activeWorkflow && !workflowDeclinedThisChat) {
+      showWorkflowConfirm(data.suggestedWorkflow);
+    }
   } catch (err) {
     addMessageToUI('assistant', 'Something went wrong. Please try again.');
     chatHistory.pop();
@@ -1160,13 +1173,33 @@ async function sendChatMessage() {
 
 function resetChat() {
   activeWorkflow = null; chatHistory = []; clearImage();
+  pendingWorkflow = null; workflowDeclinedThisChat = false; workflowConfirmedId = null;
   document.getElementById('workflowBadge').classList.remove('visible');
   document.getElementById('workflowConfirm').classList.remove('visible');
   document.getElementById('chatMessages').innerHTML = `<div class="chat-message assistant"><div class="message-bubble">What are you working on?</div><span class="message-meta">Thais</span></div>`;
 }
 
-function confirmWorkflow() { document.getElementById('workflowConfirm').classList.remove('visible'); }
-function declineWorkflow() { document.getElementById('workflowConfirm').classList.remove('visible'); }
+function showWorkflowConfirm(workflow) {
+  pendingWorkflow = workflow;
+  document.getElementById('workflowConfirmText').textContent =
+    `It looks like this is a ${workflow.label.toLowerCase()}. Want me to tailor my responses for that?`;
+  document.getElementById('workflowConfirm').classList.add('visible');
+}
+
+async function confirmWorkflow() {
+  document.getElementById('workflowConfirm').classList.remove('visible');
+  if (!pendingWorkflow) return;
+  activeWorkflow = pendingWorkflow;
+  updateWorkflowBadge(pendingWorkflow);
+  workflowConfirmedId = pendingWorkflow.id;
+  pendingWorkflow = null;
+}
+
+function declineWorkflow() {
+  document.getElementById('workflowConfirm').classList.remove('visible');
+  pendingWorkflow = null;
+  workflowDeclinedThisChat = true;
+}
 
 function updateWorkflowBadge(workflow) {
   document.getElementById('workflowIcon').textContent = workflow.icon || '';
