@@ -66,6 +66,7 @@ function prioritizeMemories(memories, limit) {
     if (m.confidence === 'high') s += 20;
     if (m.confidence === 'medium') s += 10;
     if (m.source === 'stated') s += 5;
+    if (m.source === 'synthesized') s += 15;
     // Recency bonus — memories updated in last 7 days get a boost
     const age = Date.now() - new Date(m.updated_at).getTime();
     const daysOld = age / (1000 * 60 * 60 * 24);
@@ -150,6 +151,133 @@ async function cleanupDuplicates(userId) {
   };
 }
 
+const COMPRESSION_SYSTEM_PROMPT = `You are a memory compression system for a personal AI assistant.
+Synthesize a group of related memories into concise, high-value knowledge statements.
+
+Rules:
+- Combine redundant observations into single clear statements
+- Preserve the most specific and useful details
+- Discard vague or low-value generalizations
+- Each output statement must be standalone and immediately useful
+- Produce no more than 3 synthesized statements per group
+
+Respond ONLY with valid JSON: { "statements": ["...", "..."] }`;
+
+async function compressMemories(userId) {
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) throw new Error('No API key configured for compression');
+
+  const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+
+  const candidates = await sbFetch(
+    '/memories?user_id=eq.' + encodeURIComponent(userId) +
+    '&anchor=eq.false' +
+    '&superseded=eq.false' +
+    '&updated_at=lt.' + thirtyDaysAgo +
+    '&order=category.asc,confidence.asc' +
+    '&limit=200'
+  );
+
+  if (!candidates || candidates.length < 5) {
+    return { compressed: 0, synthesized: 0, message: 'Not enough old memories to compress yet' };
+  }
+
+  const grouped = {};
+  for (const m of candidates) {
+    if (!grouped[m.category]) grouped[m.category] = [];
+    grouped[m.category].push(m);
+  }
+
+  let totalCompressed = 0;
+  let totalSynthesized = 0;
+
+  for (const [category, memories] of Object.entries(grouped)) {
+    if (memories.length < 3) continue;
+
+    for (let i = 0; i < memories.length; i += 10) {
+      const batch = memories.slice(i, i + 10);
+      if (batch.length < 2) continue;
+
+      const memoryList = batch
+        .map((m, idx) => `${idx + 1}. [${m.confidence}] ${m.content}`)
+        .join('\n');
+
+      try {
+        const response = await fetch('https://api.anthropic.com/v1/messages', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-api-key': apiKey,
+            'anthropic-version': '2023-06-01',
+          },
+          body: JSON.stringify({
+            model: 'claude-haiku-4-5-20251001',
+            max_tokens: 500,
+            system: COMPRESSION_SYSTEM_PROMPT,
+            messages: [{
+              role: 'user',
+              content: `Category: ${category}\n\nMemories:\n${memoryList}\n\nSynthesize into 1-3 high-value statements.`,
+            }],
+          }),
+        });
+
+        const data = await response.json();
+        const text = data.content?.[0]?.text;
+        if (!text) continue;
+
+        const parsed = JSON.parse(text.replace(/```json|```/g, '').trim());
+        const statements = (parsed.statements || []).filter((s) => s && s.length > 10);
+
+        for (const m of batch) {
+          try {
+            await sbFetch('/memories?id=eq.' + m.id, {
+              method: 'PATCH',
+              headers: { 'Prefer': 'return=minimal' },
+              body: JSON.stringify({ superseded: true, updated_at: new Date().toISOString() }),
+            });
+            totalCompressed++;
+          } catch (err) {
+            console.error('[compress] failed to supersede', m.id, err.message);
+          }
+        }
+
+        for (const stmt of statements.slice(0, 3)) {
+          try {
+            await sbFetch('/memories', {
+              method: 'POST',
+              body: JSON.stringify({
+                user_id: userId,
+                category,
+                weight: 'major',
+                content: stmt,
+                source: 'synthesized',
+                confidence: 'high',
+                anchor: false,
+                sequence: 0,
+                occurrences: batch.length,
+                superseded: false,
+                created_at: new Date().toISOString(),
+                updated_at: new Date().toISOString(),
+              }),
+            });
+            totalSynthesized++;
+          } catch (err) {
+            console.error('[compress] failed to store synthesis', err.message);
+          }
+        }
+      } catch (err) {
+        console.error('[compress] synthesis failed for category', category, err.message);
+      }
+    }
+  }
+
+  return {
+    compressed: totalCompressed,
+    synthesized: totalSynthesized,
+    message: `Compressed ${totalCompressed} memories into ${totalSynthesized} synthesized insights`,
+  };
+}
+
 export default async function handler(req, res) {
   const authHeader = req.headers.authorization;
   const authenticatedUserId = await validateSession(authHeader);
@@ -161,6 +289,16 @@ export default async function handler(req, res) {
   // GET — fetch memories for the memory panel
   if (req.method === 'GET') {
     const action = req.query && req.query.action;
+
+    if (action === 'compress') {
+      try {
+        const result = await compressMemories(authenticatedUserId);
+        return res.status(200).json(result);
+      } catch (err) {
+        console.error('[memories compress] error:', err.message);
+        return res.status(500).json({ error: 'Compression failed' });
+      }
+    }
 
     // One-time cleanup action
     if (action === 'cleanup') {
