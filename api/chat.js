@@ -11,7 +11,7 @@ const SUPABASE_SERVICE_KEY = process.env.supabase_ret_key || process.env.SUPABAS
 const BRAVE_KEY = process.env.BRAVE_SEARCH_KEY;
 const BASE_URL = process.env.VERCEL_URL
   ? 'https://' + process.env.VERCEL_URL
-  : 'https://promptforge-n3yh.vercel.app';
+  : process.env.BASE_URL || 'https://thais.ai';
 
 // -- Workflow definitions ---------------------------------------------
 
@@ -640,7 +640,7 @@ export default async function handler(req, res) {
     if (isGreeting(message) && userId !== 'anonymous') {
       try {
         const diagResponse = await fetch(
-          (process.env.VERCEL_URL ? 'https://' + process.env.VERCEL_URL : 'https://promptforge-n3yh.vercel.app') + '/api/diagnostics',
+          BASE_URL + '/api/diagnostics',
           {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
