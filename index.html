@@ -1551,28 +1551,21 @@ function stopListening() {
 async function runDiagnostics() {
   document.getElementById('accountDropdown').classList.remove('open');
   setMode('chat');
-  const now = new Date().toLocaleString('en-US', {
-    weekday: 'long', year: 'numeric', month: 'long',
-    day: 'numeric', hour: '2-digit', minute: '2-digit', timeZoneName: 'short',
-  });
-  // Show the trigger message in chat so it appears as a real exchange
+  // Route through /api/chat (not /api/diagnostics directly) so the diagnostic
+  // stats get injected into Thais's real system prompt and the exchange becomes
+  // part of the actual conversation/memory, instead of a one-off stats dump.
   const triggerMessage = 'How are you doing?';
   addMessageToUI('user', triggerMessage);
   chatHistory.push({ role: 'user', content: triggerMessage });
   setChatLoading(true);
   try {
-    const res = await fetch('/api/diagnostics', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ userId: chatUserId, mode: 'full', recentHistory: chatHistory.slice(-4), currentDateTime: now }),
-    });
+    const body = { message: triggerMessage, history: chatHistory.slice(0, -1), userId: chatUserId };
+    const res = await fetch('/api/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
     const data = await res.json();
-    if (data.message) {
-      addMessageToUI('assistant', data.message);
-      // Push into chat history so Thais remembers this exchange
-      chatHistory.push({ role: 'assistant', content: data.message });
-      if (autoSpeak) speakText(data.message);
-    }
+    if (!res.ok) throw new Error(data.error || 'Request failed');
+    addMessageToUI('assistant', data.message);
+    chatHistory.push({ role: 'assistant', content: data.message });
+    if (autoSpeak) speakText(data.message);
   } catch(e) {
     addMessageToUI('assistant', 'Diagnostic check failed.');
     chatHistory.pop(); // Remove the user trigger if it failed
