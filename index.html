@@ -681,6 +681,9 @@
     <button onclick="runMemoryCompress()" id="compressBtn" style="width:100%;padding:10px;background:transparent;border:1px solid var(--border);border-radius:6px;color:var(--muted);font-family:var(--font-mono);font-size:11px;letter-spacing:.06em;cursor:pointer;margin-bottom:12px;transition:border-color .15s,color .15s;" onmouseover="this.style.borderColor='var(--accent2)';this.style.color='var(--accent2)'" onmouseout="this.style.borderColor='var(--border)';this.style.color='var(--muted)'">
       ◈ Compress old memories into insights
     </button>
+    <button onclick="runMemoryConsolidate()" id="consolidateBtn" style="width:100%;padding:10px;background:transparent;border:1px solid var(--border);border-radius:6px;color:var(--muted);font-family:var(--font-mono);font-size:11px;letter-spacing:.06em;cursor:pointer;margin-bottom:12px;transition:border-color .15s,color .15s;" onmouseover="this.style.borderColor='var(--accent)';this.style.color='var(--accent)'" onmouseout="this.style.borderColor='var(--border)';this.style.color='var(--muted)'">
+      ✦ Run one-time redundancy consolidation
+    </button>
     <p class="memory-privacy-note">
       <span>Private by design.</span> Your memories are never shared, never sold, and only ever used to help you work better.
     </p>
@@ -1348,6 +1351,34 @@ async function runMemoryCompress() {
     showToast('Compression failed — try again');
   } finally {
     if (btn) { btn.textContent = '◈ Compress old memories into insights'; btn.disabled = false; }
+  }
+}
+
+// ── One-time consolidation (redundant memory clusters) ───────
+async function runMemoryConsolidate() {
+  const btn = document.getElementById('consolidateBtn');
+  if (btn) { btn.textContent = '✦ Consolidating...'; btn.disabled = true; }
+  try {
+    const { data: { session } } = await supabaseClient.auth.getSession();
+    if (!session) { showToast('Not signed in'); return; }
+    const res = await fetch('/api/memories?action=consolidate', {
+      method: 'GET',
+      headers: {
+        'Authorization': 'Bearer ' + session.access_token,
+        'Content-Type': 'application/json',
+      },
+    });
+    const data = await res.json();
+    if (data.message) {
+      showToast(data.superseded + ' redundant memories merged into ' + data.inserted + ' entries');
+      setTimeout(() => loadMemories(), 1000);
+    } else {
+      showToast('Consolidation failed — try again');
+    }
+  } catch(err) {
+    showToast('Consolidation failed — try again');
+  } finally {
+    if (btn) { btn.textContent = '✦ Run one-time redundancy consolidation'; btn.disabled = false; }
   }
 }
 

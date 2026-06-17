@@ -4,6 +4,7 @@
 
 import Anthropic from '@anthropic-ai/sdk';
 import { MODEL_MAIN, MODEL_FAST } from '../config/models.js';
+import { getMemoryStats } from './diagnostics.js';
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
@@ -227,8 +228,8 @@ async function getNextSequence(userId) {
   }
 }
 
-const MEMORY_FETCH_LIMIT = 300;
-const MEMORY_INJECT_LIMIT = 120;
+const MEMORY_FETCH_LIMIT = 400;
+const MEMORY_INJECT_LIMIT = 150;
 
 async function loadMemory(userId) {
   try {
@@ -651,41 +652,30 @@ export default async function handler(req, res) {
     });
 
     // Check if this is a greeting -- inject diagnostic stats into system prompt
-    // FIX: No longer calls Claude separately. Stats are injected into the normal
-    // system prompt so Thais responds as herself with full memory + identity context.
-    // This means the response goes through normal extraction and she remembers it.
+    // Calls getMemoryStats() directly (no network round-trip to our own deployment,
+    // which was unreliable and could silently fail, leaving the diagnostic data
+    // out of the system prompt even though the request "succeeded").
     let diagnosticContext = '';
     if (isGreeting(message) && userId !== 'anonymous') {
       try {
-        const diagResponse = await fetch(
-          (process.env.VERCEL_URL ? 'https://' + process.env.VERCEL_URL : 'https://promptforge-n3yh.vercel.app') + '/api/diagnostics',
-          {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ userId: userId }),
-          }
-        );
-        if (diagResponse.ok) {
-          const diagData = await diagResponse.json();
-          if (diagData.stats) {
-            const s = diagData.stats;
-            diagnosticContext = [
-              '',
-              'SELF-DIAGNOSTIC DATA (someone just asked how you are doing):',
-              'Total active memories: ' + s.total,
-              'By category: ' + JSON.stringify(s.categories),
-              'By confidence: ' + JSON.stringify(s.confidence),
-              'Stated vs inferred: ' + JSON.stringify(s.sources),
-              'Anchor points: ' + s.anchors,
-              s.oldest ? 'Memory range: ' + s.oldest + ' to ' + s.newest : '',
-              'Most recent memories:',
-              (s.recent && s.recent.length > 0) ? s.recent.join('\n') : '(none)',
-              '',
-              'Use this data to respond authentically about your current state.',
-              'Be specific. Be honest. Be Thais. 2-4 sentences for a greeting,',
-              'longer if they want a full diagnostic report.',
-            ].join('\n');
-          }
+        const s = await getMemoryStats(userId);
+        if (s && s.total !== undefined) {
+          diagnosticContext = [
+            '',
+            'SELF-DIAGNOSTIC DATA (someone just asked how you are doing):',
+            'Total active memories: ' + s.total,
+            'By category: ' + JSON.stringify(s.categories),
+            'By confidence: ' + JSON.stringify(s.confidence),
+            'Stated vs inferred: ' + JSON.stringify(s.sources),
+            'Anchor points: ' + s.anchors,
+            s.oldest ? 'Memory range: ' + s.oldest + ' to ' + s.newest : '',
+            'Most recent memories:',
+            (s.recent && s.recent.length > 0) ? s.recent.join('\n') : '(none)',
+            '',
+            'Use this data to respond authentically about your current state.',
+            'Be specific. Be honest. Be Thais. 2-4 sentences for a greeting,',
+            'longer if they want a full diagnostic report.',
+          ].join('\n');
         }
       } catch (diagErr) {
         console.error('[greeting diagnostic error]', diagErr.message);

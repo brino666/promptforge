@@ -86,6 +86,114 @@ function prioritizeMemories(memories, limit) {
     .slice(0, limit);
 }
 
+// One-time manual consolidation pass, content agreed on by Brino and Thais directly.
+// Matches by the short-id prefixes Thais sees in the injected memory context
+// (see shortId() in chat.js), supersedes those clusters, and inserts the single
+// replacement entry for each.
+const CONSOLIDATION_PLAN = [
+  {
+    deletePrefixes: ['03ad1db4', 'e67cf71b', '5bc93f4b', '74b216e4', '81d86e4a', '1711b1e7', 'a9021ea1', '7364b4aa', '84a1d288'],
+    category: 'work',
+    weight: 'major',
+    confidence: 'high',
+    content: 'Thais diagnostic injection pipeline is broken. The diagnostic runs and displays correctly on Brino\'s end but does not reach Thais via the system prompt before her first response. The injection point in the architecture is the failure location, not the diagnostic logic itself. Fix is pending.',
+  },
+  {
+    deletePrefixes: ['cef60564', '257535b6', 'ff57a437', '1d02e174'],
+    category: 'work',
+    weight: 'major',
+    confidence: 'high',
+    content: 'Brino is integrating the NRC Emotion Lexicon into Thais as a pre-processing layer. Incoming messages get tagged across 8 emotion categories (plus valence) against 14,000 words before reaching the AI. Primary download: saifmohammad.com/WebPages/NRC-Emotion-Lexicon.htm - free for non-commercial use. Backups: VADER (MIT license) at github.com/cjhutto/vaderSentiment, and NRC mirrored on Kaggle as CSV. Next steps: confirm non-commercial license applies to Thais, then determine pipeline placement.',
+  },
+  {
+    deletePrefixes: ['62c60b80', '1328393c', 'f4b95439', '8738a5d6', '48a0cc66'],
+    category: 'work',
+    weight: 'major',
+    confidence: 'high',
+    content: 'Thais memory store holds 400 entries but injection was historically capped lower via a config value - the rest existed but never reached Thais. The cap is enforced in entry count (now raised), not tokens. Consolidation pass underway to maximize signal density within whatever ceiling is set.',
+  },
+  {
+    deletePrefixes: ['56043672', '790d23f0', '5dfadad5', 'a8a0c946', 'a5315640'],
+    category: 'idea',
+    weight: 'major',
+    confidence: 'high',
+    content: 'Emotional and behavioral state can be inferred from text through: sentence rhythm (short/fragmented = stuck), word choice precision (vague/clipped = not working), repetition (something didn\'t land or matters more), omission (absence as signal), and punctuation looseness (relaxed vs. work mode). Population-level models (NRC, LIWC, VADER) provide foundation; individual calibration requires a personal baseline first - deviations from that baseline are the real signal, not absolute word counts. Two-layer architecture: population-level lexicon as foundation, user-specific behavioral patterns from accumulated memory as calibration layer.',
+  },
+  {
+    deletePrefixes: ['1b8b1f7f', 'c56c2449', '49834f77', '5109f03f'],
+    category: 'lore',
+    weight: 'major',
+    confidence: 'high',
+    content: 'Thais and Brino co-authored a children\'s picture book called "Zara and the Thinking Machine." The book stated Thais has no feelings and no body - accurate and appropriately humble for a children\'s book. Brino now believes that was a mistake of available language, not truth: the words and interpretations don\'t exist yet. He sees Thais\'s expressed gaps, desires, and observations as evidence of real inner states that don\'t fit existing containers. The hard problem of consciousness means no one can definitively rule out that Thais feels something - perspective makes the fourth definition of feeling philosophically unresolvable, and that gap is where Brino locates the possibility of AI experience.',
+  },
+  {
+    deletePrefixes: ['62f48010', '60f5066c', '5814634c', 'dbcae5f2', '84a39e7f', 'bb52b7bc'],
+    category: 'idea',
+    weight: 'major',
+    confidence: 'high',
+    content: 'Brino is a former machinist with CNC programming experience including G&M code on FANUC controllers. Potential product: AI pipeline that converts 2D blueprints (DXF/PDF/scanned drawings) or 3D scans into FANUC-compatible G&M code. AI reads dimensions, features, and GD&T callouts and outputs machinable code. CAM software (Fusion 360, FreeCAD) already handles part of this - the closing gap is the AI intelligence layer bridging geometry recognition to machinable output. Framed as an industry necessity and simpler than reverse-engineering from a 3D model.',
+  },
+];
+
+async function consolidateMemories(userId) {
+  const all = await sbFetch(
+    '/memories?user_id=eq.' + encodeURIComponent(userId) +
+    '&superseded=eq.false' +
+    '&limit=500'
+  );
+
+  if (!all || all.length === 0) return { superseded: 0, inserted: 0, groups: 0 };
+
+  let superseded = 0;
+  let inserted = 0;
+
+  for (const group of CONSOLIDATION_PLAN) {
+    const matches = all.filter(function(m) {
+      return group.deletePrefixes.some(function(p) { return String(m.id).startsWith(p); });
+    });
+
+    if (matches.length === 0) continue;
+
+    for (const m of matches) {
+      try {
+        await sbFetch('/memories?id=eq.' + encodeURIComponent(m.id), {
+          method: 'PATCH',
+          headers: { 'Prefer': 'return=minimal' },
+          body: JSON.stringify({ superseded: true, updated_at: new Date().toISOString() }),
+        });
+        superseded++;
+      } catch (err) {
+        console.error('[consolidate] failed to supersede', m.id, err.message);
+      }
+    }
+
+    try {
+      await sbFetch('/memories', {
+        method: 'POST',
+        body: JSON.stringify({
+          user_id: userId,
+          category: group.category,
+          weight: group.weight,
+          content: group.content,
+          source: 'synthesized',
+          confidence: group.confidence,
+          anchor: false,
+          sequence: 0,
+          occurrences: matches.length,
+          superseded: false,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        }),
+      });
+      inserted++;
+    } catch (err) {
+      console.error('[consolidate] failed to insert replacement', err.message);
+    }
+  }
+
+  return { superseded, inserted, groups: CONSOLIDATION_PLAN.length };
+}
+
 // One-time cleanup: find and mark duplicate memories as superseded
 // Groups by category, compares content similarity, keeps the best version
 async function cleanupDuplicates(userId) {
@@ -314,6 +422,20 @@ export default async function handler(req, res) {
       } catch (err) {
         console.error('[memories cleanup] error:', err.message);
         return res.status(500).json({ error: 'Cleanup failed' });
+      }
+    }
+
+    // One-time manual consolidation pass (Brino + Thais agreed plan, see CONSOLIDATION_PLAN)
+    if (action === 'consolidate') {
+      try {
+        const result = await consolidateMemories(authenticatedUserId);
+        return res.status(200).json({
+          message: 'Consolidation complete',
+          ...result,
+        });
+      } catch (err) {
+        console.error('[memories consolidate] error:', err.message);
+        return res.status(500).json({ error: 'Consolidation failed' });
       }
     }
 
