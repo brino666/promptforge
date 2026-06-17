@@ -926,6 +926,20 @@ async function loadMemories() {
   }
 }
 
+function formatRelativeTime(isoString) {
+  const diffMs = Date.now() - new Date(isoString).getTime();
+  const minutes = Math.floor(diffMs / 60000);
+  if (minutes < 1) return 'just now';
+  if (minutes < 60) return minutes + 'm ago';
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return hours + 'h ago';
+  const days = Math.floor(hours / 24);
+  if (days < 30) return days + 'd ago';
+  const months = Math.floor(days / 30);
+  if (months < 12) return months + 'mo ago';
+  return Math.floor(months / 12) + 'y ago';
+}
+
 function renderMemoryGroups(list) {
   const container = document.getElementById('memoryGroups');
   container.innerHTML = '';
@@ -958,6 +972,7 @@ function renderMemoryGroups(list) {
       const weightBadge = memory.weight === 'major' ? '<span class="confidence-badge medium">major</span>' : '';
       const tierLabels = { active: '🟢 active', knowledge: '🔵 knowledge', working: '🟡 working', archive: '⚪ archive' };
       const tierBadge = memory.tier ? `<span class="occurrences-badge" title="Memory tier">${tierLabels[memory.tier] || memory.tier}</span>` : '';
+      const timeBadge = memory.updated_at ? `<span class="occurrences-badge" title="${new Date(memory.updated_at).toLocaleString()}">${formatRelativeTime(memory.updated_at)}</span>` : '';
       card.innerHTML = `
         <div class="memory-card-content">${escapeHtml(memory.content)}</div>
         <div class="memory-card-meta">
@@ -967,6 +982,7 @@ function renderMemoryGroups(list) {
             ${anchorBadge}
             ${tierBadge}
             <span class="occurrences-badge">${occurrenceText}</span>
+            ${timeBadge}
           </div>
           <button class="memory-delete-btn" onclick="deleteMemory('${memory.id}')">Delete</button>
         </div>`;
