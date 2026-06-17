@@ -1653,21 +1653,28 @@ function startListening() {
 
   recognition.onresult = function(e) {
     if (silenceTimer) clearTimeout(silenceTimer);
-    // Rebuild the full transcript from e.results every time instead of
-    // incrementally appending from e.resultIndex -- on Android Chrome,
-    // resultIndex/continuous mode can resend overlapping ranges, and
-    // appending on top of that causes runaway word/phrase duplication.
-    let final = '';
+    // Rebuild the transcript from e.results every time, but treat each
+    // "final" entry that's a growing revision of the previous one (this
+    // device's speech engine re-sends the same segment longer each time,
+    // still marked isFinal) as a REPLACEMENT, not a new segment to append --
+    // otherwise every revision gets summed on top of the last, producing
+    // runaway repeated phrases.
+    const finalParts = [];
     let interim = '';
     for (let i = 0; i < e.results.length; i++) {
       const transcript = e.results[i][0].transcript;
       if (e.results[i].isFinal) {
-        final += (final ? ' ' : '') + transcript;
+        const prev = finalParts[finalParts.length - 1] || '';
+        if (transcript.toLowerCase().startsWith(prev.toLowerCase())) {
+          finalParts[finalParts.length - 1] = transcript;
+        } else {
+          finalParts.push(transcript);
+        }
       } else {
-        interim += transcript;
+        interim = transcript;
       }
     }
-    const combined = [final, interim].filter(Boolean).join(' ');
+    const combined = [finalParts.join(' '), interim].filter(Boolean).join(' ');
     input.value = baseValue + (baseValue && combined ? ' ' : '') + combined;
     autoResizeChatInput(input);
     scheduleAutoSend();
