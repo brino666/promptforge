@@ -1530,33 +1530,58 @@ function toggleMic() {
 function startListening() {
   const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
   recognition = new SpeechRecognition();
-  recognition.continuous = false;
+  // continuous + manual silence timer instead of the browser's own (much shorter,
+  // non-configurable) end-of-utterance cutoff -- lets the user pause to think
+  // mid-thought without getting cut off and auto-sent after one phrase.
+  recognition.continuous = true;
   recognition.interimResults = true;
   recognition.lang = 'en-US';
 
   const input = document.getElementById('chatInput');
   const btn = document.getElementById('micBtn');
-  const existingText = input.value;
+  let finalTranscript = input.value;
+  let silenceTimer = null;
+  const SILENCE_MS = 2000;
+
+  function scheduleAutoSend() {
+    if (silenceTimer) clearTimeout(silenceTimer);
+    silenceTimer = setTimeout(function() {
+      if (input.value.trim()) {
+        stopListening();
+        sendChatMessage();
+      }
+    }, SILENCE_MS);
+  }
 
   recognition.onstart = function() {
     isListening = true;
     btn.classList.add('listening');
-    input.placeholder = 'Listening...';
+    input.placeholder = 'Listening... (pause to send, tap mic to stop)';
   };
 
   recognition.onresult = function(e) {
-    const transcript = Array.from(e.results)
-      .map(function(r) { return r[0].transcript; })
-      .join('');
-    input.value = existingText + (existingText ? ' ' : '') + transcript;
+    if (silenceTimer) clearTimeout(silenceTimer);
+    let interim = '';
+    for (let i = e.resultIndex; i < e.results.length; i++) {
+      const transcript = e.results[i][0].transcript;
+      if (e.results[i].isFinal) {
+        finalTranscript += (finalTranscript ? ' ' : '') + transcript;
+      } else {
+        interim += transcript;
+      }
+    }
+    input.value = finalTranscript + (interim ? ' ' + interim : '');
     autoResizeChatInput(input);
+    scheduleAutoSend();
   };
 
   recognition.onend = function() {
     isListening = false;
     btn.classList.remove('listening');
     input.placeholder = 'Say what\'s on your mind...';
-    // Auto-send if we got something
+    if (silenceTimer) clearTimeout(silenceTimer);
+    // continuous mode can still end on its own (e.g. long total silence) --
+    // send whatever was captured rather than losing it silently.
     if (input.value.trim()) {
       setTimeout(function() { sendChatMessage(); }, 300);
     }
@@ -1566,6 +1591,7 @@ function startListening() {
     isListening = false;
     btn.classList.remove('listening');
     input.placeholder = 'Say what\'s on your mind...';
+    if (silenceTimer) clearTimeout(silenceTimer);
     if (e.error !== 'no-speech') showToast('Mic error: ' + e.error);
   };
 
@@ -1573,7 +1599,7 @@ function startListening() {
 }
 
 function stopListening() {
-  if (recognition) { recognition.stop(); recognition = null; }
+  if (recognition) { recognition.onend = null; recognition.stop(); recognition = null; }
   isListening = false;
   document.getElementById('micBtn').classList.remove('listening');
 }
