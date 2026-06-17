@@ -1629,7 +1629,9 @@ function startListening() {
 
   const input = document.getElementById('chatInput');
   const btn = document.getElementById('micBtn');
-  let finalTranscript = input.value;
+  // Whatever was already typed/dictated before this recognition session started.
+  // We never mutate this -- each onresult rebuilds the rest from scratch.
+  const baseValue = input.value;
   let silenceTimer = null;
   const SILENCE_MS = 2000;
 
@@ -1651,16 +1653,22 @@ function startListening() {
 
   recognition.onresult = function(e) {
     if (silenceTimer) clearTimeout(silenceTimer);
+    // Rebuild the full transcript from e.results every time instead of
+    // incrementally appending from e.resultIndex -- on Android Chrome,
+    // resultIndex/continuous mode can resend overlapping ranges, and
+    // appending on top of that causes runaway word/phrase duplication.
+    let final = '';
     let interim = '';
-    for (let i = e.resultIndex; i < e.results.length; i++) {
+    for (let i = 0; i < e.results.length; i++) {
       const transcript = e.results[i][0].transcript;
       if (e.results[i].isFinal) {
-        finalTranscript += (finalTranscript ? ' ' : '') + transcript;
+        final += (final ? ' ' : '') + transcript;
       } else {
         interim += transcript;
       }
     }
-    input.value = finalTranscript + (interim ? ' ' + interim : '');
+    const combined = [final, interim].filter(Boolean).join(' ');
+    input.value = baseValue + (baseValue && combined ? ' ' : '') + combined;
     autoResizeChatInput(input);
     scheduleAutoSend();
   };

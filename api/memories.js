@@ -211,7 +211,9 @@ export async function resolveDiagnosticMemory(userId) {
 
   const matches = all.filter(function(m) {
     const c = (m.content || '').toLowerCase();
-    return c.includes('diagnostic') && (c.includes('broken') || c.includes('pending') || c.includes('does not reach'));
+    if (!c.includes('diagnostic')) return false;
+    if (c.includes('fixed') || c.includes('verified')) return false; // already the correct statement
+    return c.includes('inject') || c.includes('broken') || c.includes('pending') || c.includes('does not reach') || c.includes('bug');
   });
 
   let superseded = 0;
@@ -491,8 +493,15 @@ async function deepConsolidate(userId) {
 
   if (!all || all.length === 0) return { categoriesProcessed: 0, superseded: 0, inserted: 0 };
 
+  // Already-synthesized memories are canonical, condensed corrections (e.g. bug-fix
+  // confirmations). Re-merging them risks an LLM flattening/rewording away the exact
+  // distinction (fixed vs. broken) that made them worth writing in the first place --
+  // this happened once already and produced a false "still broken" memory. Leave them
+  // untouched.
+  const candidates = all.filter(function(m) { return m.source !== 'synthesized'; });
+
   const grouped = {};
-  for (const m of all) {
+  for (const m of candidates) {
     if (!grouped[m.category]) grouped[m.category] = [];
     grouped[m.category].push(m);
   }
