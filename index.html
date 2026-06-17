@@ -346,6 +346,10 @@
     transition: border-color .15s;
   }
   .memory-card:hover { border-color: #3a3a3a; }
+  .memory-card-fed {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 1px var(--accent) inset;
+  }
 
   .memory-card-content {
     font-size: 13px;
@@ -870,6 +874,7 @@ function toggleMemoryInfo() {
 }
 
 let allMemories = [];
+let lastInjectedMemoryIds = [];
 
 const MEMORY_CATEGORY_ORDER = ['personal','work','plan','idea','lore'];
 const MEMORY_CATEGORY_LABELS = {
@@ -968,7 +973,8 @@ function renderMemoryGroups(list) {
 
     items.forEach(memory => {
       const card = document.createElement('div');
-      card.className = 'memory-card';
+      const wasFed = lastInjectedMemoryIds.includes(memory.id);
+      card.className = 'memory-card' + (wasFed ? ' memory-card-fed' : '');
       card.id = 'memory-' + memory.id;
       const occurrenceText = memory.occurrences > 1 ? `mentioned ${memory.occurrences}×` : 'mentioned once';
       const anchorBadge = memory.anchor ? '<span class="confidence-badge high">⚓ anchor</span>' : '';
@@ -976,12 +982,14 @@ function renderMemoryGroups(list) {
       const tierLabels = { active: '🟢 active', knowledge: '🔵 knowledge', working: '🟡 working', archive: '⚪ archive' };
       const tierBadge = memory.tier ? `<span class="occurrences-badge" title="Memory tier">${tierLabels[memory.tier] || memory.tier}</span>` : '';
       const timeBadge = memory.updated_at ? `<span class="occurrences-badge" title="${new Date(memory.updated_at).toLocaleString()}">${formatRelativeTime(memory.updated_at)}</span>` : '';
+      const fedBadge = wasFed ? '<span class="confidence-badge high" title="Sent to Thais on the last reply">→ fed last reply</span>' : '';
       card.innerHTML = `
         <div class="memory-card-content">${escapeHtml(memory.content)}</div>
         <div class="memory-card-meta">
           <div class="memory-card-tags">
             <span class="confidence-badge ${memory.confidence}">${memory.confidence}</span>
             ${weightBadge}
+            ${fedBadge}
             ${anchorBadge}
             ${tierBadge}
             <span class="occurrences-badge">${occurrenceText}</span>
@@ -1181,6 +1189,10 @@ async function sendChatMessage() {
     if (!res.ok) throw new Error(data.error || 'Request failed');
     addMessageToUI('assistant', data.message);
     chatHistory.push({ role: 'assistant', content: data.message });
+    if (data.injectedMemoryIds) {
+      lastInjectedMemoryIds = data.injectedMemoryIds;
+      if (allMemories.length) renderMemoryGroups(allMemories);
+    }
     if (data.workflow && data.workflow.id !== 'general' && !activeWorkflow) {
       activeWorkflow = data.workflow;
       updateWorkflowBadge(data.workflow);

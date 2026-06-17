@@ -873,6 +873,7 @@ export default async function handler(req, res) {
       searchPerformed: searchPerformed,
       searchQuery: searchQuery,
       isOwner: isOwner,
+      injectedMemoryIds: memories.map(function(m) { return m.id; }),
     });
 
   } catch (error) {
