@@ -733,6 +733,17 @@
         </label>
       </div>
 
+      <div class="settings-row">
+        <div>
+          <div class="settings-label">Continuous voice chat</div>
+          <div class="settings-sublabel">Mic reopens automatically after Thais replies -- no need to tap it each turn</div>
+        </div>
+        <label class="toggle-switch">
+          <input type="checkbox" id="continuousVoiceToggle" onchange="saveSetting('continuousVoice', this.checked)">
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+
       <div class="settings-row" style="flex-direction:column;align-items:flex-start;">
         <div class="settings-label">Thais voice</div>
         <div class="settings-sublabel" style="margin-bottom:8px;">Choose how Thais sounds</div>
@@ -779,6 +790,8 @@ let memoryInfoVisible = false;
 
 // ── Voice / speech state ──────────────────────────────────────
 let autoSpeak = true;
+let continuousVoice = false;
+let continuousVoicePaused = false;
 let micEnabled = true;
 let selectedVoiceName = '';
 let currentUtterance = null;
@@ -1272,6 +1285,10 @@ function addMessageToUI(role, content, imageDataUrl) {
   // Auto-speak assistant messages
   if (role === 'assistant' && autoSpeak) {
     speakText(content);
+  } else if (role === 'assistant' && continuousVoice && !continuousVoicePaused && !isListening) {
+    // Auto-speak is off, so there's no speech to wait for -- reopen the mic
+    // right away so continuous voice chat still works without it.
+    startListening();
   }
 }
 
@@ -1460,6 +1477,7 @@ function saveSetting(key, value) {
   if (key === 'autoSpeak') autoSpeak = value;
   if (key === 'micEnabled') micEnabled = value;
   if (key === 'voiceName') selectedVoiceName = value;
+  if (key === 'continuousVoice') { continuousVoice = value; continuousVoicePaused = false; }
 }
 
 function loadSettings() {
@@ -1474,6 +1492,10 @@ function loadSettings() {
 
     const vn = localStorage.getItem('thais_voiceName');
     selectedVoiceName = vn ? JSON.parse(vn) : '';
+
+    const cv = localStorage.getItem('thais_continuousVoice');
+    continuousVoice = cv !== null ? JSON.parse(cv) : false;
+    document.getElementById('continuousVoiceToggle').checked = continuousVoice;
 
     updateMicBtn();
   } catch(e) {}
@@ -1553,6 +1575,11 @@ function speakText(text) {
   currentUtterance.rate = 0.95;
   currentUtterance.pitch = 1.0;
   currentUtterance.volume = 1.0;
+  if (continuousVoice) {
+    currentUtterance.onend = function() {
+      if (continuousVoice && !continuousVoicePaused && !isListening) startListening();
+    };
+  }
   window.speechSynthesis.speak(currentUtterance);
 }
 
@@ -1580,8 +1607,12 @@ function toggleMic() {
     return;
   }
   if (isListening) {
+    // User is deliberately stopping -- don't let continuous mode reopen the mic
+    // until they tap it to start again.
+    continuousVoicePaused = continuousVoice;
     stopListening();
   } else {
+    continuousVoicePaused = false;
     startListening();
   }
 }
