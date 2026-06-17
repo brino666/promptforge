@@ -230,11 +230,16 @@ async function getNextSequence(userId) {
 }
 
 const MEMORY_FETCH_LIMIT = 400;
-// Total non-anchor memories injected per turn. Kept small and topic-driven
+// Hard ceiling on total memories injected per turn (anchors + topic-relevant),
+// matching what's shown in the panel as "fed". Anchors used to be injected
+// uncapped, so as they accumulated over time the real injected count could
+// blow past any intended target -- this keeps the whole package bounded.
+const TOTAL_MEMORY_LIMIT = 35;
+const MAX_ANCHORS = 12;
+// Remaining non-anchor memories injected per turn. Kept small and topic-driven
 // (rather than a static "always inject the top 20 by importance" set) so the
 // window tracks what's actually being talked about right now and drops
 // stale subjects once the conversation moves on, instead of accumulating.
-const CONTEXT_MEMORY_LIMIT = 25;
 const RECENT_TURNS_FOR_TOPIC = 4; // last 2 exchanges (user+assistant each)
 const STOPWORDS = new Set(['the','a','an','and','or','but','is','are','was','were','be','been','to','of','in','on','for','with','at','by','from','as','that','this','it','i','you','we','they','my','your','our','what','how','do','does','did','have','has','had','about','me','her','him','them']);
 
@@ -273,10 +278,16 @@ async function loadMemory(userId, currentMessage, recentHistory) {
       '&limit=' + MEMORY_FETCH_LIMIT
     );
 
-    // Anchors are always injected, uncapped -- they're the identity/priority package
-    // (username, current project, workflow prefs) that should never get crowded out.
-    const anchors = rows.filter(function(m) { return m.anchor; });
+    // Anchors are the identity/priority package (username, current project,
+    // workflow prefs) and go in first, but still capped -- otherwise as they
+    // accumulate over time they alone could exceed the whole injection budget.
+    const allAnchors = rows.filter(function(m) { return m.anchor; });
+    const anchors = allAnchors
+      .slice()
+      .sort(function(a, b) { return new Date(b.updated_at) - new Date(a.updated_at); })
+      .slice(0, MAX_ANCHORS);
     const nonAnchors = rows.filter(function(m) { return !m.anchor; });
+    const remainingBudget = Math.max(0, TOTAL_MEMORY_LIMIT - anchors.length);
 
     // Topic window: the current message plus the last couple of exchanges,
     // not the full conversation -- so relevance tracks what's being talked
@@ -302,7 +313,7 @@ async function loadMemory(userId, currentMessage, recentHistory) {
         return { m, s };
       })
       .sort(function(a, b) { return b.s - a.s; })
-      .slice(0, CONTEXT_MEMORY_LIMIT)
+      .slice(0, remainingBudget)
       .map(function(x) { return x.m; });
 
     return anchors.concat(ranked);

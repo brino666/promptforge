@@ -933,6 +933,8 @@ async function loadMemories() {
     allMemories = data;
 
     if (!data || data.length === 0) {
+      document.getElementById('memoryEmpty').innerHTML =
+        'Thais hasn\'t learned anything about you yet.<br>Start a conversation and she\'ll begin building a picture of how you work.';
       document.getElementById('memoryEmpty').style.display = 'block';
       return;
     }
@@ -940,7 +942,7 @@ async function loadMemories() {
     const searchInput = document.getElementById('memorySearchInput');
     searchInput.style.display = 'block';
     searchInput.value = '';
-    renderMemoryGroups(allMemories);
+    renderFedMemories();
 
   } catch(err) {
     document.getElementById('memoryLoading').style.display = 'none';
@@ -960,6 +962,20 @@ function formatRelativeTime(isoString) {
   const months = Math.floor(days / 30);
   if (months < 12) return months + 'mo ago';
   return Math.floor(months / 12) + 'y ago';
+}
+
+function renderFedMemories() {
+  document.getElementById('memoryNoResults').style.display = 'none';
+  if (!lastInjectedMemoryIds.length) {
+    document.getElementById('memoryGroups').innerHTML = '';
+    document.getElementById('memoryEmpty').innerHTML =
+      'Nothing injected yet this session.<br>Send Thais a message and this panel will show exactly what she\'s holding in mind for that reply.';
+    document.getElementById('memoryEmpty').style.display = 'block';
+    return;
+  }
+  document.getElementById('memoryEmpty').style.display = 'none';
+  const fed = allMemories.filter(m => lastInjectedMemoryIds.includes(m.id));
+  renderMemoryGroups(fed);
 }
 
 function renderMemoryGroups(list) {
@@ -1021,13 +1037,14 @@ function renderMemoryGroups(list) {
 function filterMemories(query) {
   const trimmed = query.trim().toLowerCase();
   document.getElementById('memoryNoResults').style.display = 'none';
+  const fed = allMemories.filter(m => lastInjectedMemoryIds.includes(m.id));
 
   if (!trimmed) {
-    renderMemoryGroups(allMemories);
+    renderMemoryGroups(fed);
     return;
   }
 
-  const matches = allMemories.filter(m =>
+  const matches = fed.filter(m =>
     (m.content || '').toLowerCase().includes(trimmed) ||
     (m.category || '').toLowerCase().includes(trimmed)
   );
@@ -1660,6 +1677,8 @@ function startListening() {
       // No result at all since the last reset -- this session has gone
       // silently dead. Tear it down and open a fresh one rather than leaving
       // the mic icon on with nothing actually listening.
+      console.warn('[speech] watchdog fired -- no result received within', WATCHDOG_MS, 'ms');
+      showToast('Mic restarting (no audio detected)');
       if (recognition) {
         recognition.onend = null;
         try { recognition.stop(); } catch (e) {}
@@ -1729,10 +1748,26 @@ function startListening() {
     btn.classList.remove('listening');
     input.placeholder = 'Say what\'s on your mind...';
     if (silenceTimer) clearTimeout(silenceTimer);
-    if (e.error !== 'no-speech') showToast('Mic error: ' + e.error);
+    // Surfacing every code (not just non-"no-speech" ones) while this is
+    // still being diagnosed -- "no-speech" itself is useful signal here: if
+    // it fires repeatedly even while actively talking, the mic isn't capturing
+    // audio at all (permission/hardware issue), not just a quiet pause.
+    showToast('Mic error: ' + e.error);
+    console.warn('[speech] onerror', e.error);
   };
 
-  recognition.start();
+  // start() can throw synchronously (e.g. mic permission already denied,
+  // or a stray previous session not fully torn down) -- without this, that
+  // exception would silently kill the call and leave the button looking
+  // like it's listening when nothing actually started.
+  try {
+    recognition.start();
+  } catch (e) {
+    console.warn('[speech] start() threw', e);
+    showToast('Mic failed to start: ' + e.message);
+    isListening = false;
+    btn.classList.remove('listening');
+  }
 }
 
 function stopListening() {
