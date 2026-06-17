@@ -285,14 +285,20 @@ async function cleanupDuplicates(userId) {
         // Check for substring match either way
         if (itemLower.includes(keptLower.slice(0, 50))) return true;
         if (keptLower.includes(itemLower.slice(0, 50))) return true;
-        // Check for high word overlap
-        const itemWords = new Set(itemLower.split(/\s+/).filter(w => w.length > 4));
-        const keptWords = new Set(keptLower.split(/\s+/).filter(w => w.length > 4));
+        // Check for high word overlap (strip punctuation, drop common stopwords
+        // so short factual statements like "the user's name is X" phrased
+        // differently still get caught as duplicates)
+        const stop = new Set(['the','a','an','and','or','but','is','are','was','were','be','been','to','of','in','on','for','with','at','by','from','as','that','this','it','user','users']);
+        function words(s) {
+          return (s.match(/[a-z0-9']+/g) || []).filter(function(w) { return w.length > 2 && !stop.has(w); });
+        }
+        const itemWords = new Set(words(itemLower));
+        const keptWords = new Set(words(keptLower));
         if (itemWords.size === 0) return false;
         let overlap = 0;
         itemWords.forEach(function(w) { if (keptWords.has(w)) overlap++; });
         const similarity = overlap / Math.max(itemWords.size, keptWords.size);
-        return similarity > 0.6;
+        return similarity > 0.5;
       });
 
       if (isDuplicate) {

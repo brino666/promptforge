@@ -230,9 +230,32 @@ async function getNextSequence(userId) {
 }
 
 const MEMORY_FETCH_LIMIT = 400;
-const MEMORY_INJECT_LIMIT = 150;
+const ACTIVE_SET_LIMIT = 20;
+const ARCHIVE_RECALL_LIMIT = 10;
+const STOPWORDS = new Set(['the','a','an','and','or','but','is','are','was','were','be','been','to','of','in','on','for','with','at','by','from','as','that','this','it','i','you','we','they','my','your','our','what','how','do','does','did','have','has','had','about','me','her','him','them']);
 
-async function loadMemory(userId) {
+function scoreMemory(m) {
+  let s = 0;
+  if (m.anchor) s += 1000;
+  if (m.weight === 'major') s += 100;
+  if (m.confidence === 'high') s += 20;
+  if (m.confidence === 'medium') s += 10;
+  if (m.source === 'stated') s += 5;
+  if (m.source === 'synthesized') s += 15;
+  const age = Date.now() - new Date(m.updated_at).getTime();
+  const daysOld = age / (1000 * 60 * 60 * 24);
+  if (daysOld < 7) s += 15;
+  if (daysOld < 1) s += 10;
+  s += Math.min((m.occurrences || 1) * 3, 15);
+  return s;
+}
+
+function extractKeywords(text) {
+  return (text.toLowerCase().match(/[a-z0-9']+/g) || [])
+    .filter(function(w) { return w.length > 2 && !STOPWORDS.has(w); });
+}
+
+async function loadMemory(userId, currentMessage) {
   try {
     // Fetch more than we need, then prioritize smartly
     const rows = await sbFetch(
@@ -241,27 +264,42 @@ async function loadMemory(userId) {
       '&order=anchor.desc,updated_at.desc' +
       '&limit=' + MEMORY_FETCH_LIMIT
     );
-    // Score and return best MEMORY_INJECT_LIMIT for context injection
-    // anchor > major weight > high confidence > stated > recent > occurrences
-    const scored = rows.slice().sort(function(a, b) {
-      function score(m) {
-        let s = 0;
-        if (m.anchor) s += 1000;
-        if (m.weight === 'major') s += 100;
-        if (m.confidence === 'high') s += 20;
-        if (m.confidence === 'medium') s += 10;
-        if (m.source === 'stated') s += 5;
-        if (m.source === 'synthesized') s += 15;
-        const age = Date.now() - new Date(m.updated_at).getTime();
-        const daysOld = age / (1000 * 60 * 60 * 24);
-        if (daysOld < 7) s += 15;
-        if (daysOld < 1) s += 10;
-        s += Math.min((m.occurrences || 1) * 3, 15);
-        return s;
+
+    const scored = rows.slice().sort(function(a, b) { return scoreMemory(b) - scoreMemory(a); });
+
+    // Anchors are always injected, uncapped -- they're the identity/priority package
+    // (username, current project, workflow prefs) that should never get crowded out.
+    const anchors = scored.filter(function(m) { return m.anchor; });
+    const nonAnchors = scored.filter(function(m) { return !m.anchor; });
+
+    // Active set: the next-most-relevant general memories by score, kept small
+    // on purpose so they don't drown out the anchors or each other.
+    const active = nonAnchors.slice(0, ACTIVE_SET_LIMIT);
+    const remainder = nonAnchors.slice(ACTIVE_SET_LIMIT);
+
+    // Archive recall: only pull in memories outside the active set if they
+    // actually relate to what the user is asking about right now, by keyword
+    // overlap with the current message. This is what makes recall feel organic
+    // instead of just replaying the same static "important" memories every time.
+    let recalled = [];
+    if (currentMessage && remainder.length) {
+      const queryWords = new Set(extractKeywords(currentMessage));
+      if (queryWords.size) {
+        recalled = remainder
+          .map(function(m) {
+            const memWords = extractKeywords(m.content);
+            let hits = 0;
+            for (const w of memWords) { if (queryWords.has(w)) hits++; }
+            return { m, hits };
+          })
+          .filter(function(x) { return x.hits > 0; })
+          .sort(function(a, b) { return b.hits - a.hits; })
+          .slice(0, ARCHIVE_RECALL_LIMIT)
+          .map(function(x) { return x.m; });
       }
-      return score(b) - score(a);
-    });
-    return scored.slice(0, MEMORY_INJECT_LIMIT);
+    }
+
+    return anchors.concat(active, recalled);
   } catch (err) {
     console.error('[memory load error]', err.message);
     return [];
@@ -667,7 +705,7 @@ export default async function handler(req, res) {
 
   try {
     const isLoggedIn = userId !== 'anonymous';
-    const memories = isLoggedIn ? await loadMemory(userId) : [];
+    const memories = isLoggedIn ? await loadMemory(userId, message) : [];
     const memoryContext = buildMemoryContext(memories);
     const sequence = isLoggedIn ? await getNextSequence(userId) : 0;
 
