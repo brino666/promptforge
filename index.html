@@ -798,6 +798,8 @@ let currentUtterance = null;
 let recognition = null;
 let isListening = false;
 let micWatchdogTimer = null;
+let micWatchdogRetries = 0;
+const MAX_WATCHDOG_RETRIES = 2;
 
 // ── Supabase init ─────────────────────────────────────────────
 (async () => {
@@ -1636,6 +1638,7 @@ function toggleMic() {
     stopListening();
   } else {
     continuousVoicePaused = false;
+    micWatchdogRetries = 0;
     startListening();
   }
 }
@@ -1675,14 +1678,29 @@ function startListening() {
     if (micWatchdogTimer) clearTimeout(micWatchdogTimer);
     micWatchdogTimer = setTimeout(function() {
       // No result at all since the last reset -- this session has gone
-      // silently dead. Tear it down and open a fresh one rather than leaving
-      // the mic icon on with nothing actually listening.
-      console.warn('[speech] watchdog fired -- no result received within', WATCHDOG_MS, 'ms');
-      showToast('Mic restarting (no audio detected)');
+      // silently dead. Retrying forever here is what caused a real crash:
+      // if the mic truly never captures audio (permission/hardware issue,
+      // not a one-off glitch), each retry opens a brand new recognition
+      // session every 4s without the previous one's resources being fully
+      // released on Android, snowballing until the device runs out of
+      // resources. So this gives up after a couple of tries instead of
+      // retrying indefinitely.
+      micWatchdogRetries++;
+      console.warn('[speech] watchdog fired (attempt ' + micWatchdogRetries + ') -- no result received within', WATCHDOG_MS, 'ms');
       if (recognition) {
         recognition.onend = null;
-        try { recognition.stop(); } catch (e) {}
+        recognition.onerror = null;
+        try { recognition.abort(); } catch (e) {}
       }
+      if (micWatchdogRetries > MAX_WATCHDOG_RETRIES) {
+        showToast('Mic isn\'t capturing audio -- check microphone permission for this site, then tap the mic to try again');
+        isListening = false;
+        continuousVoicePaused = true;
+        btn.classList.remove('listening');
+        input.placeholder = 'Say what\'s on your mind...';
+        return;
+      }
+      showToast('Mic restarting (no audio detected)');
       startListening();
     }, WATCHDOG_MS);
   }
@@ -1701,6 +1719,7 @@ function startListening() {
 
   recognition.onresult = function(e) {
     if (micWatchdogTimer) clearTimeout(micWatchdogTimer);
+    micWatchdogRetries = 0;
     if (silenceTimer) clearTimeout(silenceTimer);
     // Rebuild the transcript from e.results every time, but treat each
     // "final" entry that's a growing revision of the previous one (this
@@ -1772,6 +1791,7 @@ function startListening() {
 
 function stopListening() {
   if (micWatchdogTimer) { clearTimeout(micWatchdogTimer); micWatchdogTimer = null; }
+  micWatchdogRetries = 0;
   if (recognition) { recognition.onend = null; recognition.stop(); recognition = null; }
   isListening = false;
   document.getElementById('micBtn').classList.remove('listening');
