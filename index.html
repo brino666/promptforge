@@ -797,6 +797,9 @@ let selectedVoiceName = '';
 let currentUtterance = null;
 let recognition = null;
 let isListening = false;
+let micWatchdogTimer = null;
+let micWatchdogRetries = 0;
+const MAX_WATCHDOG_RETRIES = 2;
 
 // ── Supabase init ─────────────────────────────────────────────
 (async () => {
@@ -932,6 +935,8 @@ async function loadMemories() {
     allMemories = data;
 
     if (!data || data.length === 0) {
+      document.getElementById('memoryEmpty').innerHTML =
+        'Thais hasn\'t learned anything about you yet.<br>Start a conversation and she\'ll begin building a picture of how you work.';
       document.getElementById('memoryEmpty').style.display = 'block';
       return;
     }
@@ -939,7 +944,7 @@ async function loadMemories() {
     const searchInput = document.getElementById('memorySearchInput');
     searchInput.style.display = 'block';
     searchInput.value = '';
-    renderMemoryGroups(allMemories);
+    renderFedMemories();
 
   } catch(err) {
     document.getElementById('memoryLoading').style.display = 'none';
@@ -959,6 +964,20 @@ function formatRelativeTime(isoString) {
   const months = Math.floor(days / 30);
   if (months < 12) return months + 'mo ago';
   return Math.floor(months / 12) + 'y ago';
+}
+
+function renderFedMemories() {
+  document.getElementById('memoryNoResults').style.display = 'none';
+  if (!lastInjectedMemoryIds.length) {
+    document.getElementById('memoryGroups').innerHTML = '';
+    document.getElementById('memoryEmpty').innerHTML =
+      'Nothing injected yet this session.<br>Send Thais a message and this panel will show exactly what she\'s holding in mind for that reply.';
+    document.getElementById('memoryEmpty').style.display = 'block';
+    return;
+  }
+  document.getElementById('memoryEmpty').style.display = 'none';
+  const fed = allMemories.filter(m => lastInjectedMemoryIds.includes(m.id));
+  renderMemoryGroups(fed);
 }
 
 function renderMemoryGroups(list) {
@@ -1020,13 +1039,14 @@ function renderMemoryGroups(list) {
 function filterMemories(query) {
   const trimmed = query.trim().toLowerCase();
   document.getElementById('memoryNoResults').style.display = 'none';
+  const fed = allMemories.filter(m => lastInjectedMemoryIds.includes(m.id));
 
   if (!trimmed) {
-    renderMemoryGroups(allMemories);
+    renderMemoryGroups(fed);
     return;
   }
 
-  const matches = allMemories.filter(m =>
+  const matches = fed.filter(m =>
     (m.content || '').toLowerCase().includes(trimmed) ||
     (m.category || '').toLowerCase().includes(trimmed)
   );
@@ -1204,7 +1224,12 @@ async function sendChatMessage() {
     chatHistory.push({ role: 'assistant', content: data.message });
     if (data.injectedMemoryIds) {
       lastInjectedMemoryIds = data.injectedMemoryIds;
-      if (allMemories.length) renderMemoryGroups(allMemories);
+      // Re-fetch rather than just re-rendering the stale list -- each reply
+      // can extract new memories, and the panel should reflect those as they
+      // happen instead of only showing whatever was loaded when it was opened.
+      if (document.getElementById('memoryPanel').classList.contains('open')) {
+        loadMemories();
+      }
     }
     if (data.workflow && data.workflow.id !== 'general' && !activeWorkflow) {
       activeWorkflow = data.workflow;
@@ -1613,27 +1638,31 @@ function toggleMic() {
     stopListening();
   } else {
     continuousVoicePaused = false;
+    micWatchdogRetries = 0;
     startListening();
   }
 }
 
 function startListening() {
   const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-  recognition = new SpeechRecognition();
-  // continuous + manual silence timer instead of the browser's own (much shorter,
-  // non-configurable) end-of-utterance cutoff -- lets the user pause to think
-  // mid-thought without getting cut off and auto-sent after one phrase.
-  recognition.continuous = true;
-  recognition.interimResults = true;
-  recognition.lang = 'en-US';
-
   const input = document.getElementById('chatInput');
   const btn = document.getElementById('micBtn');
-  // Whatever was already typed/dictated before this recognition session started.
+  // Whatever was already typed/dictated before this listening session started.
   // We never mutate this -- each onresult rebuilds the rest from scratch.
   const baseValue = input.value;
   let silenceTimer = null;
   const SILENCE_MS = 2000;
+  // On Android Chrome, continuous mode sometimes opens the mic, fires onstart,
+  // and then never fires onresult at all -- it just silently goes dead until
+  // it times out on its own. (A chained-restart-on-every-utterance approach
+  // was tried instead of continuous mode, but starting a new recognition
+  // session immediately after stopping the previous one is itself unreliable
+  // on Android and made things worse -- cutting off early and sometimes never
+  // recovering.) This watchdog detects the "opened but produced nothing"
+  // case specifically and force-restarts just that dead session, while still
+  // using continuous=true for its real benefit: not cutting the user off
+  // mid-thought during a normal pause.
+  const WATCHDOG_MS = 4000;
 
   function scheduleAutoSend() {
     if (silenceTimer) clearTimeout(silenceTimer);
@@ -1645,13 +1674,52 @@ function startListening() {
     }, SILENCE_MS);
   }
 
+  function armWatchdog() {
+    if (micWatchdogTimer) clearTimeout(micWatchdogTimer);
+    micWatchdogTimer = setTimeout(function() {
+      // No result at all since the last reset -- this session has gone
+      // silently dead. Retrying forever here is what caused a real crash:
+      // if the mic truly never captures audio (permission/hardware issue,
+      // not a one-off glitch), each retry opens a brand new recognition
+      // session every 4s without the previous one's resources being fully
+      // released on Android, snowballing until the device runs out of
+      // resources. So this gives up after a couple of tries instead of
+      // retrying indefinitely.
+      micWatchdogRetries++;
+      console.warn('[speech] watchdog fired (attempt ' + micWatchdogRetries + ') -- no result received within', WATCHDOG_MS, 'ms');
+      if (recognition) {
+        recognition.onend = null;
+        recognition.onerror = null;
+        try { recognition.abort(); } catch (e) {}
+      }
+      if (micWatchdogRetries > MAX_WATCHDOG_RETRIES) {
+        showToast('Mic isn\'t capturing audio -- check microphone permission for this site, then tap the mic to try again');
+        isListening = false;
+        continuousVoicePaused = true;
+        btn.classList.remove('listening');
+        input.placeholder = 'Say what\'s on your mind...';
+        return;
+      }
+      showToast('Mic restarting (no audio detected)');
+      startListening();
+    }, WATCHDOG_MS);
+  }
+
+  recognition = new SpeechRecognition();
+  recognition.continuous = true;
+  recognition.interimResults = true;
+  recognition.lang = 'en-US';
+
   recognition.onstart = function() {
     isListening = true;
     btn.classList.add('listening');
     input.placeholder = 'Listening... (pause to send, tap mic to stop)';
+    armWatchdog();
   };
 
   recognition.onresult = function(e) {
+    if (micWatchdogTimer) clearTimeout(micWatchdogTimer);
+    micWatchdogRetries = 0;
     if (silenceTimer) clearTimeout(silenceTimer);
     // Rebuild the transcript from e.results every time, but treat each
     // "final" entry that's a growing revision of the previous one (this
@@ -1681,6 +1749,7 @@ function startListening() {
   };
 
   recognition.onend = function() {
+    if (micWatchdogTimer) clearTimeout(micWatchdogTimer);
     isListening = false;
     btn.classList.remove('listening');
     input.placeholder = 'Say what\'s on your mind...';
@@ -1693,17 +1762,36 @@ function startListening() {
   };
 
   recognition.onerror = function(e) {
+    if (micWatchdogTimer) clearTimeout(micWatchdogTimer);
     isListening = false;
     btn.classList.remove('listening');
     input.placeholder = 'Say what\'s on your mind...';
     if (silenceTimer) clearTimeout(silenceTimer);
-    if (e.error !== 'no-speech') showToast('Mic error: ' + e.error);
+    // Surfacing every code (not just non-"no-speech" ones) while this is
+    // still being diagnosed -- "no-speech" itself is useful signal here: if
+    // it fires repeatedly even while actively talking, the mic isn't capturing
+    // audio at all (permission/hardware issue), not just a quiet pause.
+    showToast('Mic error: ' + e.error);
+    console.warn('[speech] onerror', e.error);
   };
 
-  recognition.start();
+  // start() can throw synchronously (e.g. mic permission already denied,
+  // or a stray previous session not fully torn down) -- without this, that
+  // exception would silently kill the call and leave the button looking
+  // like it's listening when nothing actually started.
+  try {
+    recognition.start();
+  } catch (e) {
+    console.warn('[speech] start() threw', e);
+    showToast('Mic failed to start: ' + e.message);
+    isListening = false;
+    btn.classList.remove('listening');
+  }
 }
 
 function stopListening() {
+  if (micWatchdogTimer) { clearTimeout(micWatchdogTimer); micWatchdogTimer = null; }
+  micWatchdogRetries = 0;
   if (recognition) { recognition.onend = null; recognition.stop(); recognition = null; }
   isListening = false;
   document.getElementById('micBtn').classList.remove('listening');

@@ -230,8 +230,17 @@ async function getNextSequence(userId) {
 }
 
 const MEMORY_FETCH_LIMIT = 400;
-const ACTIVE_SET_LIMIT = 20;
-const ARCHIVE_RECALL_LIMIT = 10;
+// Hard ceiling on total memories injected per turn (anchors + topic-relevant),
+// matching what's shown in the panel as "fed". Anchors used to be injected
+// uncapped, so as they accumulated over time the real injected count could
+// blow past any intended target -- this keeps the whole package bounded.
+const TOTAL_MEMORY_LIMIT = 35;
+const MAX_ANCHORS = 12;
+// Remaining non-anchor memories injected per turn. Kept small and topic-driven
+// (rather than a static "always inject the top 20 by importance" set) so the
+// window tracks what's actually being talked about right now and drops
+// stale subjects once the conversation moves on, instead of accumulating.
+const RECENT_TURNS_FOR_TOPIC = 4; // last 2 exchanges (user+assistant each)
 const STOPWORDS = new Set(['the','a','an','and','or','but','is','are','was','were','be','been','to','of','in','on','for','with','at','by','from','as','that','this','it','i','you','we','they','my','your','our','what','how','do','does','did','have','has','had','about','me','her','him','them']);
 
 function scoreMemory(m) {
@@ -240,7 +249,11 @@ function scoreMemory(m) {
   if (m.weight === 'major') s += 100;
   if (m.confidence === 'high') s += 20;
   if (m.confidence === 'medium') s += 10;
-  if (m.source === 'stated') s += 5;
+  // Only a confirmed, directly-stated fact earns an innate importance boost.
+  // Inferred memories have to earn their place in context through relevance
+  // to what's actually being discussed right now (see loadMemory), not just
+  // by existing -- that's what let stale inferences calcify into "important."
+  if (m.source === 'stated') s += 8;
   if (m.source === 'synthesized') s += 15;
   const age = Date.now() - new Date(m.updated_at).getTime();
   const daysOld = age / (1000 * 60 * 60 * 24);
@@ -255,7 +268,7 @@ function extractKeywords(text) {
     .filter(function(w) { return w.length > 2 && !STOPWORDS.has(w); });
 }
 
-async function loadMemory(userId, currentMessage) {
+async function loadMemory(userId, currentMessage, recentHistory) {
   try {
     // Fetch more than we need, then prioritize smartly
     const rows = await sbFetch(
@@ -265,41 +278,45 @@ async function loadMemory(userId, currentMessage) {
       '&limit=' + MEMORY_FETCH_LIMIT
     );
 
-    const scored = rows.slice().sort(function(a, b) { return scoreMemory(b) - scoreMemory(a); });
+    // Anchors are the identity/priority package (username, current project,
+    // workflow prefs) and go in first, but still capped -- otherwise as they
+    // accumulate over time they alone could exceed the whole injection budget.
+    const allAnchors = rows.filter(function(m) { return m.anchor; });
+    const anchors = allAnchors
+      .slice()
+      .sort(function(a, b) { return new Date(b.updated_at) - new Date(a.updated_at); })
+      .slice(0, MAX_ANCHORS);
+    const nonAnchors = rows.filter(function(m) { return !m.anchor; });
+    const remainingBudget = Math.max(0, TOTAL_MEMORY_LIMIT - anchors.length);
 
-    // Anchors are always injected, uncapped -- they're the identity/priority package
-    // (username, current project, workflow prefs) that should never get crowded out.
-    const anchors = scored.filter(function(m) { return m.anchor; });
-    const nonAnchors = scored.filter(function(m) { return !m.anchor; });
+    // Topic window: the current message plus the last couple of exchanges,
+    // not the full conversation -- so relevance tracks what's being talked
+    // about *right now* and naturally drops memories once the subject changes,
+    // instead of a fixed "top 20 most important overall" set that never moves.
+    const topicText = [currentMessage || '']
+      .concat((recentHistory || []).slice(-RECENT_TURNS_FOR_TOPIC).map(function(m) { return m.content || ''; }))
+      .join(' ');
+    const topicWords = new Set(extractKeywords(topicText));
 
-    // Active set: the next-most-relevant general memories by score, kept small
-    // on purpose so they don't drown out the anchors or each other.
-    const active = nonAnchors.slice(0, ACTIVE_SET_LIMIT);
-    const remainder = nonAnchors.slice(ACTIVE_SET_LIMIT);
+    const ranked = nonAnchors
+      .map(function(m) {
+        let s = scoreMemory(m);
+        if (topicWords.size) {
+          const memWords = extractKeywords(m.content);
+          let hits = 0;
+          for (const w of memWords) { if (topicWords.has(w)) hits++; }
+          // Relevance to the live topic dominates the ranking -- a memory that
+          // matches what's being discussed now should beat a higher-scored but
+          // off-topic one, and fall out of context once the subject moves on.
+          s += hits * 25;
+        }
+        return { m, s };
+      })
+      .sort(function(a, b) { return b.s - a.s; })
+      .slice(0, remainingBudget)
+      .map(function(x) { return x.m; });
 
-    // Archive recall: only pull in memories outside the active set if they
-    // actually relate to what the user is asking about right now, by keyword
-    // overlap with the current message. This is what makes recall feel organic
-    // instead of just replaying the same static "important" memories every time.
-    let recalled = [];
-    if (currentMessage && remainder.length) {
-      const queryWords = new Set(extractKeywords(currentMessage));
-      if (queryWords.size) {
-        recalled = remainder
-          .map(function(m) {
-            const memWords = extractKeywords(m.content);
-            let hits = 0;
-            for (const w of memWords) { if (queryWords.has(w)) hits++; }
-            return { m, hits };
-          })
-          .filter(function(x) { return x.hits > 0; })
-          .sort(function(a, b) { return b.hits - a.hits; })
-          .slice(0, ARCHIVE_RECALL_LIMIT)
-          .map(function(x) { return x.m; });
-      }
-    }
-
-    return anchors.concat(active, recalled);
+    return anchors.concat(ranked);
   } catch (err) {
     console.error('[memory load error]', err.message);
     return [];
@@ -308,15 +325,24 @@ async function loadMemory(userId, currentMessage) {
 
 async function upsertMemory(userId, entry, sequence) {
   try {
+    // Restrict anchor status to memories the user actually stated -- an
+    // inference should never become a load-bearing "always true" identity
+    // point just because the model decided it was significant.
+    const safeAnchor = !!(entry.anchor && entry.source === 'stated');
+
     // Use a longer, lowercase snippet for better dedup matching
     const searchSnippet = entry.content.slice(0, 60).toLowerCase().replace(/['"]/g, '');
 
-    // Load all non-superseded memories in this category to check for semantic duplicates
+    // Load all non-superseded memories across ALL categories to check for
+    // duplicates -- a same-idea memory that gets re-extracted under a
+    // different category (very common -- the same fact can plausibly read
+    // as "work" or "idea" depending on phrasing) used to skip dedup entirely
+    // and pile up as a "new" memory every time, which is how one real fact
+    // turns into a dozen reworded near-duplicates.
     const existing = await sbFetch(
       '/memories?user_id=eq.' + encodeURIComponent(userId) +
-      '&category=eq.' + entry.category +
       '&superseded=eq.false' +
-      '&limit=20'
+      '&limit=60'
     );
 
     // First pass: exact/near-exact substring match (fast, no API call)
@@ -331,7 +357,7 @@ async function upsertMemory(userId, entry, sequence) {
     // Second pass: semantic duplicate check via Haiku if we have candidates and no exact match
     if (!record && existing.length > 0) {
       try {
-        const candidateList = existing.slice(0, 10).map(function(m, i) {
+        const candidateList = existing.slice(0, 20).map(function(m, i) {
           return (i + 1) + '. ' + m.content;
         }).join('\n');
 
@@ -369,9 +395,22 @@ async function upsertMemory(userId, entry, sequence) {
     }
 
     if (record) {
-      // Found a duplicate — update occurrence count and confidence
+      // Found a duplicate — update occurrence count and confidence.
+      // A stated confirmation upgrades the record's source -- the user
+      // directly confirming something inferred earlier makes it stated now.
+      const confirmedStated = record.source === 'stated' || entry.source === 'stated';
       const newOccurrences = (record.occurrences || 1) + 1;
-      const newConfidence = newOccurrences >= 3 ? 'high' : newOccurrences >= 2 ? 'medium' : record.confidence;
+      // Repetition alone only escalates confidence toward "high" for memories
+      // that are actually stated. An inference that keeps reappearing is
+      // still just an inference being repeated -- without this gate, a
+      // reworded inference that slipped past dedup a couple of times would
+      // mechanically calcify into "high confidence" fact, which is exactly
+      // how confabulations were becoming load-bearing.
+      const newConfidence = confirmedStated
+        ? (newOccurrences >= 3 ? 'high' : newOccurrences >= 2 ? 'medium' : record.confidence)
+        : (record.confidence === 'high' ? 'medium' : (record.confidence || 'medium'));
+      const newSource = confirmedStated ? 'stated' : record.source;
+      const newAnchor = record.anchor || safeAnchor;
 
       if (entry.content.length > record.content.length + 20) {
         // New version is meaningfully longer — supersede with updated content
@@ -387,9 +426,9 @@ async function upsertMemory(userId, entry, sequence) {
             category: entry.category,
             weight: entry.weight || 'minor',
             content: entry.content,
-            source: entry.source || 'inferred',
-            confidence: entry.confidence || 'medium',
-            anchor: entry.anchor || false,
+            source: newSource || entry.source || 'inferred',
+            confidence: newConfidence,
+            anchor: newAnchor,
             sequence: sequence || 0,
             occurrences: newOccurrences,
             superseded: false,
@@ -405,6 +444,8 @@ async function upsertMemory(userId, entry, sequence) {
           body: JSON.stringify({
             occurrences: newOccurrences,
             confidence: newConfidence,
+            source: newSource,
+            anchor: newAnchor,
             updated_at: new Date().toISOString(),
           }),
         });
@@ -419,8 +460,11 @@ async function upsertMemory(userId, entry, sequence) {
           weight: entry.weight || 'minor',
           content: entry.content,
           source: entry.source || 'inferred',
-          confidence: entry.confidence || 'medium',
-          anchor: entry.anchor || false,
+          // An inferred memory starts capped below "high" -- it has to earn
+          // higher confidence by being confirmed as stated, not by simply
+          // being re-extracted again.
+          confidence: entry.source === 'stated' ? (entry.confidence || 'medium') : 'low',
+          anchor: safeAnchor,
           sequence: sequence || 0,
           occurrences: 1,
           superseded: false,
@@ -446,7 +490,14 @@ function buildMemoryContext(memories) {
   const anchors = memories.filter(function(m) { return m.anchor; });
   if (anchors.length > 0) {
     lines.push('ANCHOR POINTS:');
-    anchors.forEach(function(m) { lines.push('- [' + shortId(m) + '] ' + m.content); });
+    anchors.forEach(function(m) {
+      // Anchors should be stated-only going forward (enforced at write time),
+      // but older rows from before that rule existed may still carry
+      // source: 'inferred' -- keep the flag here too so those don't render
+      // as unqualified fact just because they're in the anchor section.
+      const sourceFlag = m.source === 'inferred' ? ' [inferred]' : m.source === 'synthesized' ? ' [synthesized]' : '';
+      lines.push('- [' + shortId(m) + '] ' + m.content + sourceFlag);
+    });
     lines.push('');
   }
 
@@ -579,6 +630,10 @@ function buildSystemPrompt(workflow, memoryContext, searchContext, currentDateTi
     '- Items marked [major] -- weight these more heavily',
     '- Never volunteer "based on what I remember" -- just speak as someone who knows',
     '- Memory should feel like continuity, not surveillance',
+    '- When you bring up an [inferred] memory, paraphrase it loosely in your own',
+    '  words for this moment rather than reciting the stored phrasing verbatim --',
+    '  it should sound like something you are thinking about the person, not a',
+    '  fact being read off a card. Stated facts can be referenced more directly.',
     '- EXCEPTION: if the user directly asks why you said something, how you know it,',
     '  or where it came from, answer honestly and specifically. Say whether it was',
     '  something they told you directly, something you inferred, or a synthesized',
@@ -651,6 +706,18 @@ async function extractAndStoreMemory(userId, userMessage, assistantMessage, conv
       'SOURCE: stated (said directly) or inferred (you concluded it)',
       'ANCHOR: true only for core orientation points -- use very sparingly',
       '',
+      'STATED MEMORIES MUST BE LITERAL. If source is "stated", the content must',
+      'be the user\'s own fact in their own words from THIS conversation -- not your',
+      'paraphrase or summary of it. Do not soften, generalize, or rephrase a stated',
+      'fact into different wording across turns; reuse the same phrasing you used',
+      'for it before if it has come up. If you are characterizing, summarizing, or',
+      'drawing a conclusion rather than relaying something said outright, mark it',
+      '"inferred" -- never label your own inference as "stated".',
+      '',
+      'BE SPARING WITH INFERENCES. Only extract an inferred memory when it is',
+      'genuinely useful and reasonably confident -- inferences accumulate and',
+      'compound, so a weak or speculative one is worse than skipping it.',
+      '',
       'SPECIFICITY RULE: Never store summaries when specifics exist.',
       'Bad: "user is building a product"',
       'Good: "Building a personal AI workspace using Vercel and Supabase"',
@@ -710,7 +777,7 @@ export default async function handler(req, res) {
 
   try {
     const isLoggedIn = userId !== 'anonymous';
-    const memories = isLoggedIn ? await loadMemory(userId, message) : [];
+    const memories = isLoggedIn ? await loadMemory(userId, message, history) : [];
     const memoryContext = buildMemoryContext(memories);
     const sequence = isLoggedIn ? await getNextSequence(userId) : 0;
 

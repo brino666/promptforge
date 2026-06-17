@@ -55,28 +55,24 @@ async function validateSession(authHeader) {
   }
 }
 
-// Smart memory prioritization:
-// 1. Anchors always first
-// 2. Major weight over minor
-// 3. High confidence over medium
-// 4. Recent over old
-// 5. Stated over inferred (more reliable)
+// Smart memory prioritization for the panel: recency-led so the user can
+// actually see new/changed memories as they're created, with anchor/weight/
+// confidence used only as small tie-breaking nudges rather than letting old
+// "major"/"high confidence" entries permanently bury everything newer.
 function prioritizeMemories(memories, limit) {
   const score = function(m) {
     let s = 0;
-    if (m.anchor) s += 1000;
-    if (m.weight === 'major') s += 100;
-    if (m.confidence === 'high') s += 20;
-    if (m.confidence === 'medium') s += 10;
-    if (m.source === 'stated') s += 5;
-    if (m.source === 'synthesized') s += 15;
-    // Recency bonus — memories updated in last 7 days get a boost
+    // Recency dominates — this is what makes new memories visible at all.
     const age = Date.now() - new Date(m.updated_at).getTime();
     const daysOld = age / (1000 * 60 * 60 * 24);
-    if (daysOld < 7) s += 15;
-    if (daysOld < 1) s += 10;
+    s += Math.max(0, 100 - daysOld); // up to +100 for something updated this moment, decaying over ~100 days
+    if (m.anchor) s += 20;
+    if (m.weight === 'major') s += 10;
+    if (m.confidence === 'high') s += 6;
+    if (m.confidence === 'medium') s += 3;
+    if (m.source === 'stated') s += 2;
     // Occurrence bonus — things mentioned multiple times are more reliable
-    s += Math.min((m.occurrences || 1) * 3, 15);
+    s += Math.min((m.occurrences || 1) * 1, 5);
     return s;
   };
 
@@ -675,15 +671,19 @@ export default async function handler(req, res) {
 
     // Normal fetch — return prioritized memories for the panel
     try {
+      // Order by recency at the DB level too -- otherwise with 400+ rows
+      // stored, a weight/confidence-first order can cut off the newest
+      // (still low-confidence/unconfirmed) memories before they're even
+      // fetched, so they'd never reach the prioritization step below.
       const all = await sbFetch(
         '/memories?user_id=eq.' + encodeURIComponent(authenticatedUserId) +
         '&superseded=eq.false' +
-        '&order=anchor.desc,weight.desc,confidence.desc,updated_at.desc' +
+        '&order=updated_at.desc' +
         '&limit=400'
       );
 
-      // Apply smart prioritization — show top 150 in panel
-      const memories = prioritizeMemories(all, 150);
+      // Apply smart prioritization — show top 200 in panel
+      const memories = prioritizeMemories(all, 200);
 
       // Tag each memory with its Constitution memory tier (active/working/knowledge/archive),
       // computed live so the user can see why a memory is weighted the way it is.
