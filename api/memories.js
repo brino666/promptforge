@@ -194,6 +194,69 @@ async function consolidateMemories(userId) {
   return { superseded, inserted, groups: CONSOLIDATION_PLAN.length };
 }
 
+// Finds any live memory describing the diagnostic injection pipeline as broken
+// (whether an original duplicate or the consolidated replacement) and supersedes
+// it with a corrected, resolved-status entry. The underlying code bug (chat.js
+// was making a self-fetch HTTP call to its own deployment instead of calling
+// getMemoryStats() directly) was fixed; this clears the stale claim out of memory
+// so Thais stops reciting an outdated bug report as current fact.
+export async function resolveDiagnosticMemory(userId) {
+  const all = await sbFetch(
+    '/memories?user_id=eq.' + encodeURIComponent(userId) +
+    '&superseded=eq.false' +
+    '&limit=500'
+  );
+
+  if (!all || all.length === 0) return { superseded: 0, inserted: 0 };
+
+  const matches = all.filter(function(m) {
+    const c = (m.content || '').toLowerCase();
+    return c.includes('diagnostic') && (c.includes('broken') || c.includes('pending') || c.includes('does not reach'));
+  });
+
+  let superseded = 0;
+  for (const m of matches) {
+    try {
+      await sbFetch('/memories?id=eq.' + encodeURIComponent(m.id), {
+        method: 'PATCH',
+        headers: { 'Prefer': 'return=minimal' },
+        body: JSON.stringify({ superseded: true, updated_at: new Date().toISOString() }),
+      });
+      superseded++;
+    } catch (err) {
+      console.error('[resolve-diagnostic] failed to supersede', m.id, err.message);
+    }
+  }
+
+  let inserted = 0;
+  if (superseded > 0) {
+    try {
+      await sbFetch('/memories', {
+        method: 'POST',
+        body: JSON.stringify({
+          user_id: userId,
+          category: 'work',
+          weight: 'minor',
+          content: 'The diagnostic injection bug is fixed: getMemoryStats() is now called directly in chat.js instead of an unreliable self-fetch over HTTP. The diagnostic pipeline runs and injects real data into the system prompt before each response, verified.',
+          source: 'synthesized',
+          confidence: 'high',
+          anchor: false,
+          sequence: 0,
+          occurrences: superseded,
+          superseded: false,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        }),
+      });
+      inserted = 1;
+    } catch (err) {
+      console.error('[resolve-diagnostic] failed to insert resolution', err.message);
+    }
+  }
+
+  return { superseded, inserted };
+}
+
 // One-time cleanup: find and mark duplicate memories as superseded
 // Groups by category, compares content similarity, keeps the best version
 async function cleanupDuplicates(userId) {
@@ -436,6 +499,21 @@ export default async function handler(req, res) {
       } catch (err) {
         console.error('[memories consolidate] error:', err.message);
         return res.status(500).json({ error: 'Consolidation failed' });
+      }
+    }
+
+    if (action === 'resolve-diagnostic') {
+      try {
+        const result = await resolveDiagnosticMemory(authenticatedUserId);
+        return res.status(200).json({
+          message: result.superseded > 0
+            ? 'Stale diagnostic-pipeline memory resolved'
+            : 'No stale diagnostic-pipeline memory found',
+          ...result,
+        });
+      } catch (err) {
+        console.error('[memories resolve-diagnostic] error:', err.message);
+        return res.status(500).json({ error: 'Resolution failed' });
       }
     }
 

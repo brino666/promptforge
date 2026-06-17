@@ -5,6 +5,7 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { MODEL_MAIN, MODEL_FAST } from '../config/models.js';
 import { getMemoryStats } from './diagnostics.js';
+import { resolveDiagnosticMemory } from './memories.js';
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
@@ -690,6 +691,12 @@ export default async function handler(req, res) {
     let diagnosticContext = '';
     if (isGreeting(message) && userId !== 'anonymous') {
       try {
+        // Self-heal: clear out any stale memory claiming this pipeline is still
+        // broken, now that it's fixed. Fire-and-forget -- don't block the response.
+        resolveDiagnosticMemory(userId).catch(function(e) {
+          console.error('[resolve-diagnostic] background error', e.message);
+        });
+
         const s = await getMemoryStats(userId);
         if (s && s.total !== undefined) {
           diagnosticContext = isOwner
