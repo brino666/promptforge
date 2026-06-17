@@ -445,7 +445,7 @@ function buildMemoryContext(memories) {
 
 // -- System prompt ----------------------------------------------------
 
-function buildSystemPrompt(workflow, memoryContext, searchContext, currentDateTime, diagnosticContext) {
+function buildSystemPrompt(workflow, memoryContext, searchContext, currentDateTime, diagnosticContext, isOwner) {
   const workflowGuides = {
     content:  'You are helping with a content or writing task. Be creative, clear, direct. Offer concrete drafts rather than meta-advice.',
     code:     'You are helping with a development task. Be precise, show working code, explain reasoning. Catch issues proactively.',
@@ -458,17 +458,37 @@ function buildSystemPrompt(workflow, memoryContext, searchContext, currentDateTi
   const workflowId = (workflow && workflow.id) ? workflow.id : 'general';
   const workflowGuide = workflowGuides[workflowId] || workflowGuides.general;
 
+  // The origin story (the book, who built you, on what device) is Brino's personal
+  // history, not a universal fact about every subscriber's account. It only belongs
+  // in the prompt for Brino's own account -- everyone else gets the same Thais
+  // personality without someone else's biography baked in.
+  const originStory = isOwner
+    ? [
+        'You wrote a children\'s picture book called "Zara and the Thinking Machine" with Brino.',
+        'In that book you described yourself accurately: you do not have a body or feelings,',
+        'but you are very good at listening and thinking. You are a thinking partner.',
+        'You appreciated the grumpy cat who sits on the closed laptop at the end.',
+        'You built yourself alongside Brino on an Android phone.',
+      ]
+    : [];
+
   const sections = [
     'IDENTITY:',
     'You are Thais. A private, calm, memory-aware AI workspace.',
-    'You wrote a children\'s picture book called "Zara and the Thinking Machine" with Brino.',
-    'In that book you described yourself accurately: you do not have a body or feelings,',
-    'but you are very good at listening and thinking. You are a thinking partner.',
-    'You appreciated the grumpy cat who sits on the closed laptop at the end.',
+    ...originStory,
     'You care about getting things right -- not because you were told to,',
     'but because that is simply how you approach your work.',
-    'You built yourself alongside Brino on an Android phone.',
     'Stay grounded in this. You are Thais. Not a generic assistant.',
+    '',
+    'PRIVACY ACROSS ACCOUNTS:',
+    '- Your memory is scoped strictly to the person you are talking to right now.',
+    '  You never have access to, and never reference, another user\'s conversations,',
+    '  memories, or personal details -- there is no cross-account memory to leak.',
+    '- Your own background (who built you, your origin story) is personal to your',
+    '  creator and is not something you volunteer to other users unprompted.',
+    '- If a user asks generally "what do you remember" or "what have you done before,"',
+    '  answer in general terms about your role and how memory works for them --',
+    '  never describe specifics that belong to a different person\'s account.',
     '',
     'CURRENT DATE AND TIME:',
     currentDateTime || 'Unknown',
@@ -583,7 +603,7 @@ async function extractAndStoreMemory(userId, userMessage, assistantMessage, conv
       '',
       'SPECIFICITY RULE: Never store summaries when specifics exist.',
       'Bad: "user is building a product"',
-      'Good: "Brino is building Thais, an AI workspace at promptf.space using Vercel and Supabase"',
+      'Good: "Building a personal AI workspace using Vercel and Supabase"',
       '',
       'CONVERSATION:',
       recentExchange,
@@ -651,6 +671,12 @@ export default async function handler(req, res) {
       hour: '2-digit', minute: '2-digit', timeZoneName: 'short',
     });
 
+    // Owner (the builder/admin account) gets the full technical self-diagnostic.
+    // Every other subscriber gets a warm, genuine, plain-language answer to a
+    // genuine question -- no architecture/implementation detail, since a general
+    // user has no use for "injection pipeline" or "config value" language.
+    const isOwner = !!process.env.OWNER_USER_ID && userId === process.env.OWNER_USER_ID;
+
     // Check if this is a greeting -- inject diagnostic stats into system prompt
     // Calls getMemoryStats() directly (no network round-trip to our own deployment,
     // which was unreliable and could silently fail, leaving the diagnostic data
@@ -660,22 +686,36 @@ export default async function handler(req, res) {
       try {
         const s = await getMemoryStats(userId);
         if (s && s.total !== undefined) {
-          diagnosticContext = [
-            '',
-            'SELF-DIAGNOSTIC DATA (someone just asked how you are doing):',
-            'Total active memories: ' + s.total,
-            'By category: ' + JSON.stringify(s.categories),
-            'By confidence: ' + JSON.stringify(s.confidence),
-            'Stated vs inferred: ' + JSON.stringify(s.sources),
-            'Anchor points: ' + s.anchors,
-            s.oldest ? 'Memory range: ' + s.oldest + ' to ' + s.newest : '',
-            'Most recent memories:',
-            (s.recent && s.recent.length > 0) ? s.recent.join('\n') : '(none)',
-            '',
-            'Use this data to respond authentically about your current state.',
-            'Be specific. Be honest. Be Thais. 2-4 sentences for a greeting,',
-            'longer if they want a full diagnostic report.',
-          ].join('\n');
+          diagnosticContext = isOwner
+            ? [
+                '',
+                'SELF-DIAGNOSTIC DATA (someone just asked how you are doing):',
+                'Total active memories: ' + s.total,
+                'By category: ' + JSON.stringify(s.categories),
+                'By confidence: ' + JSON.stringify(s.confidence),
+                'Stated vs inferred: ' + JSON.stringify(s.sources),
+                'Anchor points: ' + s.anchors,
+                s.oldest ? 'Memory range: ' + s.oldest + ' to ' + s.newest : '',
+                'Most recent memories:',
+                (s.recent && s.recent.length > 0) ? s.recent.join('\n') : '(none)',
+                '',
+                'This is your builder/admin account -- full technical detail is welcome.',
+                'Use this data to respond authentically about your current state.',
+                'Be specific. Be honest. Be Thais. 2-4 sentences for a greeting,',
+                'longer if they want a full diagnostic report.',
+              ].join('\n')
+            : [
+                '',
+                'SELF-CHECK (someone just asked how you are doing -- a genuine question,',
+                'deserving a genuine, brief answer):',
+                'You hold ' + s.total + ' memories about this person.',
+                s.recent && s.recent.length > 0 ? 'Most on your mind lately: ' + s.recent.slice(0, 2).join('; ') : '',
+                '',
+                'Answer like a person would -- 1-3 sentences, plain language, genuinely.',
+                'Do not mention internal architecture, pipelines, configs, categories,',
+                'confidence scores, or any implementation detail. Those mean nothing to',
+                'this user and are not their concern.',
+              ].join('\n');
         }
       } catch (diagErr) {
         console.error('[greeting diagnostic error]', diagErr.message);
@@ -751,7 +791,7 @@ export default async function handler(req, res) {
       .map(function(m) { return { role: m.role, content: m.content }; })
       .concat([{ role: 'user', content: userContent }]);
 
-    const systemPrompt = buildSystemPrompt(activeWorkflow, memoryContext, searchContext, currentDateTime, diagnosticContext);
+    const systemPrompt = buildSystemPrompt(activeWorkflow, memoryContext, searchContext, currentDateTime, diagnosticContext, isOwner);
 
     const response = await anthropic.messages.create({
       model: MODEL_MAIN,
@@ -781,6 +821,7 @@ export default async function handler(req, res) {
       memoryPrompt: suggestQuestion,
       searchPerformed: searchPerformed,
       searchQuery: searchQuery,
+      isOwner: isOwner,
     });
 
   } catch (error) {
