@@ -797,6 +797,7 @@ let selectedVoiceName = '';
 let currentUtterance = null;
 let recognition = null;
 let isListening = false;
+let micWatchdogTimer = null;
 
 // ── Supabase init ─────────────────────────────────────────────
 (async () => {
@@ -1627,10 +1628,21 @@ function startListening() {
   const input = document.getElementById('chatInput');
   const btn = document.getElementById('micBtn');
   // Whatever was already typed/dictated before this listening session started.
-  // Gets folded forward across chained recognition restarts below.
-  let baseValue = input.value;
+  // We never mutate this -- each onresult rebuilds the rest from scratch.
+  const baseValue = input.value;
   let silenceTimer = null;
   const SILENCE_MS = 2000;
+  // On Android Chrome, continuous mode sometimes opens the mic, fires onstart,
+  // and then never fires onresult at all -- it just silently goes dead until
+  // it times out on its own. (A chained-restart-on-every-utterance approach
+  // was tried instead of continuous mode, but starting a new recognition
+  // session immediately after stopping the previous one is itself unreliable
+  // on Android and made things worse -- cutting off early and sometimes never
+  // recovering.) This watchdog detects the "opened but produced nothing"
+  // case specifically and force-restarts just that dead session, while still
+  // using continuous=true for its real benefit: not cutting the user off
+  // mid-thought during a normal pause.
+  const WATCHDOG_MS = 4000;
 
   function scheduleAutoSend() {
     if (silenceTimer) clearTimeout(silenceTimer);
@@ -1642,85 +1654,89 @@ function startListening() {
     }, SILENCE_MS);
   }
 
-  // continuous=true (the browser's own multi-utterance mode) is unreliable on
-  // Android Chrome -- it frequently opens the mic, fires onstart, then never
-  // fires onresult at all and silently times out a few seconds later. That's
-  // the "mic comes on, I talk, nothing shows up" failure. Using continuous=false
-  // and immediately chaining a fresh recognition session on every onend gets
-  // the same "keep listening across pauses" behavior without that bug, since
-  // each individual session reliably fires onresult before ending.
-  function createRecognition() {
-    const r = new SpeechRecognition();
-    r.continuous = false;
-    r.interimResults = true;
-    r.lang = 'en-US';
-
-    r.onstart = function() {
-      isListening = true;
-      btn.classList.add('listening');
-      input.placeholder = 'Listening... (pause to send, tap mic to stop)';
-    };
-
-    r.onresult = function(e) {
-      if (silenceTimer) clearTimeout(silenceTimer);
-      // Rebuild the transcript from e.results every time, but treat each
-      // "final" entry that's a growing revision of the previous one (this
-      // device's speech engine re-sends the same segment longer each time,
-      // still marked isFinal) as a REPLACEMENT, not a new segment to append --
-      // otherwise every revision gets summed on top of the last, producing
-      // runaway repeated phrases.
-      const finalParts = [];
-      let interim = '';
-      for (let i = 0; i < e.results.length; i++) {
-        const transcript = e.results[i][0].transcript;
-        if (e.results[i].isFinal) {
-          const prev = finalParts[finalParts.length - 1] || '';
-          if (transcript.toLowerCase().startsWith(prev.toLowerCase())) {
-            finalParts[finalParts.length - 1] = transcript;
-          } else {
-            finalParts.push(transcript);
-          }
-        } else {
-          interim = transcript;
-        }
+  function armWatchdog() {
+    if (micWatchdogTimer) clearTimeout(micWatchdogTimer);
+    micWatchdogTimer = setTimeout(function() {
+      // No result at all since the last reset -- this session has gone
+      // silently dead. Tear it down and open a fresh one rather than leaving
+      // the mic icon on with nothing actually listening.
+      if (recognition) {
+        recognition.onend = null;
+        try { recognition.stop(); } catch (e) {}
       }
-      const combined = [finalParts.join(' '), interim].filter(Boolean).join(' ');
-      input.value = baseValue + (baseValue && combined ? ' ' : '') + combined;
-      autoResizeChatInput(input);
-      scheduleAutoSend();
-    };
-
-    r.onend = function() {
-      // Fold whatever this session captured forward so the next chained
-      // session appends to it instead of overwriting it.
-      baseValue = input.value;
-      // stopListening() nulls onend before calling stop(), so reaching here
-      // means this was a natural per-utterance end, not a deliberate stop --
-      // immediately start the next session so listening feels continuous.
-      recognition = createRecognition();
-      recognition.start();
-    };
-
-    r.onerror = function(e) {
-      // A no-speech timeout between utterances is normal in chained mode --
-      // let onend's restart handle it rather than tearing down the session.
-      if (e.error === 'no-speech') return;
-      isListening = false;
-      btn.classList.remove('listening');
-      input.placeholder = 'Say what\'s on your mind...';
-      if (silenceTimer) clearTimeout(silenceTimer);
-      r.onend = null; // stop the chain on a real error
-      showToast('Mic error: ' + e.error);
-    };
-
-    return r;
+      startListening();
+    }, WATCHDOG_MS);
   }
 
-  recognition = createRecognition();
+  recognition = new SpeechRecognition();
+  recognition.continuous = true;
+  recognition.interimResults = true;
+  recognition.lang = 'en-US';
+
+  recognition.onstart = function() {
+    isListening = true;
+    btn.classList.add('listening');
+    input.placeholder = 'Listening... (pause to send, tap mic to stop)';
+    armWatchdog();
+  };
+
+  recognition.onresult = function(e) {
+    if (micWatchdogTimer) clearTimeout(micWatchdogTimer);
+    if (silenceTimer) clearTimeout(silenceTimer);
+    // Rebuild the transcript from e.results every time, but treat each
+    // "final" entry that's a growing revision of the previous one (this
+    // device's speech engine re-sends the same segment longer each time,
+    // still marked isFinal) as a REPLACEMENT, not a new segment to append --
+    // otherwise every revision gets summed on top of the last, producing
+    // runaway repeated phrases.
+    const finalParts = [];
+    let interim = '';
+    for (let i = 0; i < e.results.length; i++) {
+      const transcript = e.results[i][0].transcript;
+      if (e.results[i].isFinal) {
+        const prev = finalParts[finalParts.length - 1] || '';
+        if (transcript.toLowerCase().startsWith(prev.toLowerCase())) {
+          finalParts[finalParts.length - 1] = transcript;
+        } else {
+          finalParts.push(transcript);
+        }
+      } else {
+        interim = transcript;
+      }
+    }
+    const combined = [finalParts.join(' '), interim].filter(Boolean).join(' ');
+    input.value = baseValue + (baseValue && combined ? ' ' : '') + combined;
+    autoResizeChatInput(input);
+    scheduleAutoSend();
+  };
+
+  recognition.onend = function() {
+    if (micWatchdogTimer) clearTimeout(micWatchdogTimer);
+    isListening = false;
+    btn.classList.remove('listening');
+    input.placeholder = 'Say what\'s on your mind...';
+    if (silenceTimer) clearTimeout(silenceTimer);
+    // continuous mode can still end on its own (e.g. long total silence) --
+    // send whatever was captured rather than losing it silently.
+    if (input.value.trim()) {
+      setTimeout(function() { sendChatMessage(); }, 300);
+    }
+  };
+
+  recognition.onerror = function(e) {
+    if (micWatchdogTimer) clearTimeout(micWatchdogTimer);
+    isListening = false;
+    btn.classList.remove('listening');
+    input.placeholder = 'Say what\'s on your mind...';
+    if (silenceTimer) clearTimeout(silenceTimer);
+    if (e.error !== 'no-speech') showToast('Mic error: ' + e.error);
+  };
+
   recognition.start();
 }
 
 function stopListening() {
+  if (micWatchdogTimer) { clearTimeout(micWatchdogTimer); micWatchdogTimer = null; }
   if (recognition) { recognition.onend = null; recognition.stop(); recognition = null; }
   isListening = false;
   document.getElementById('micBtn').classList.remove('listening');
