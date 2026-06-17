@@ -4,7 +4,7 @@
 // FIX: Smarter memory prioritization (anchor > major > confidence > recency)
 // NEW: /api/memories?action=cleanup for one-time dedup of existing memories
 
-import { MODEL_FAST } from '../config/models.js';
+import { MODEL_FAST, MODEL_MAIN } from '../config/models.js';
 import { scoreEntry, decideTier } from '../memory/scorer.js';
 
 const SUPABASE_URL = process.env.supabase_url || process.env.SUPABASE_URL;
@@ -458,6 +458,134 @@ async function compressMemories(userId) {
   };
 }
 
+// One-time deep consolidation: unlike compressMemories (30+ day old only,
+// batches of 10) or cleanupDuplicates (pairwise heuristic), this sends every
+// non-anchor memory in a category to Claude in one shot and asks it to
+// collapse the whole set down to the truly distinct facts, regardless of age
+// or how differently each duplicate was worded.
+const DEEP_CONSOLIDATE_PROMPT = `You are cleaning up a personal AI's memory store, which has accumulated many duplicate and near-duplicate entries -- the same fact stored multiple times with slightly different wording.
+
+You will be given every memory currently stored in one category. Your job:
+- Merge entries that describe the same underlying fact (even if worded very differently) into one clear statement.
+- Keep entries that are genuinely distinct facts, even if they're short.
+- Prefer the most specific, complete wording available across the merged entries.
+- Do not invent anything not present in the source entries.
+- Discard entries that are too vague to be useful on their own AND fully covered by a more specific entry.
+
+Respond ONLY with valid JSON, no markdown:
+{"statements":[{"content":"...","mergedCount":N,"weight":"major|minor"}]}
+
+mergedCount = how many of the input entries this statement absorbs (1 if it was already unique).`;
+
+async function deepConsolidate(userId) {
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) throw new Error('No API key configured for consolidation');
+
+  const all = await sbFetch(
+    '/memories?user_id=eq.' + encodeURIComponent(userId) +
+    '&anchor=eq.false' +
+    '&superseded=eq.false' +
+    '&order=category.asc' +
+    '&limit=500'
+  );
+
+  if (!all || all.length === 0) return { categoriesProcessed: 0, superseded: 0, inserted: 0 };
+
+  const grouped = {};
+  for (const m of all) {
+    if (!grouped[m.category]) grouped[m.category] = [];
+    grouped[m.category].push(m);
+  }
+
+  let categoriesProcessed = 0;
+  let totalSuperseded = 0;
+  let totalInserted = 0;
+
+  for (const [category, memories] of Object.entries(grouped)) {
+    if (memories.length < 2) continue;
+
+    const memoryList = memories
+      .map((m, idx) => `${idx + 1}. [${m.confidence}, ${m.weight}] ${m.content}`)
+      .join('\n');
+
+    try {
+      const response = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': apiKey,
+          'anthropic-version': '2023-06-01',
+        },
+        body: JSON.stringify({
+          model: MODEL_MAIN,
+          max_tokens: 1500,
+          system: DEEP_CONSOLIDATE_PROMPT,
+          messages: [{
+            role: 'user',
+            content: `Category: ${category}\n\nMemories:\n${memoryList}`,
+          }],
+        }),
+      });
+
+      const data = await response.json();
+      const text = data.content?.[0]?.text;
+      if (!text) continue;
+
+      const parsed = JSON.parse(text.replace(/```json|```/g, '').trim());
+      const statements = (parsed.statements || []).filter((s) => s && s.content && s.content.length > 5);
+      if (statements.length === 0) continue;
+
+      // Only worth it if we're actually shrinking the set
+      if (statements.length >= memories.length) continue;
+
+      for (const m of memories) {
+        try {
+          await sbFetch('/memories?id=eq.' + m.id, {
+            method: 'PATCH',
+            headers: { 'Prefer': 'return=minimal' },
+            body: JSON.stringify({ superseded: true, updated_at: new Date().toISOString() }),
+          });
+          totalSuperseded++;
+        } catch (err) {
+          console.error('[deep-consolidate] failed to supersede', m.id, err.message);
+        }
+      }
+
+      for (const stmt of statements) {
+        try {
+          const mergedCount = stmt.mergedCount || 1;
+          await sbFetch('/memories', {
+            method: 'POST',
+            body: JSON.stringify({
+              user_id: userId,
+              category,
+              weight: stmt.weight === 'major' ? 'major' : 'minor',
+              content: stmt.content,
+              source: 'synthesized',
+              confidence: mergedCount >= 2 ? 'high' : 'medium',
+              anchor: false,
+              sequence: 0,
+              occurrences: mergedCount,
+              superseded: false,
+              created_at: new Date().toISOString(),
+              updated_at: new Date().toISOString(),
+            }),
+          });
+          totalInserted++;
+        } catch (err) {
+          console.error('[deep-consolidate] failed to store statement', err.message);
+        }
+      }
+
+      categoriesProcessed++;
+    } catch (err) {
+      console.error('[deep-consolidate] failed for category', category, err.message);
+    }
+  }
+
+  return { categoriesProcessed, superseded: totalSuperseded, inserted: totalInserted };
+}
+
 export default async function handler(req, res) {
   const authHeader = req.headers.authorization;
   const authenticatedUserId = await validateSession(authHeader);
@@ -505,6 +633,19 @@ export default async function handler(req, res) {
       } catch (err) {
         console.error('[memories consolidate] error:', err.message);
         return res.status(500).json({ error: 'Consolidation failed' });
+      }
+    }
+
+    if (action === 'deep-consolidate') {
+      try {
+        const result = await deepConsolidate(authenticatedUserId);
+        return res.status(200).json({
+          message: `Deep consolidation complete: merged ${result.superseded} memories into ${result.inserted} across ${result.categoriesProcessed} categories`,
+          ...result,
+        });
+      } catch (err) {
+        console.error('[memories deep-consolidate] error:', err.message);
+        return res.status(500).json({ error: 'Deep consolidation failed' });
       }
     }
 
