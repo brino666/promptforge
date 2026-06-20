@@ -1112,7 +1112,6 @@ function renderMarkdown(text) {
     .replace(/^- (.+)$/gm, '<div style="margin:4px 0;">• $1</div>')
     .replace(/\n\n/g, '<br><br>').replace(/\n/g, '<br>');
 }
-
 function addMessageToUI(role, content, imageDataUrl) {
   const messages = document.getElementById('chatMessages');
   const div = document.createElement('div');
@@ -1121,16 +1120,26 @@ function addMessageToUI(role, content, imageDataUrl) {
   const metaLabel = role === 'user' ? 'You' : 'Thais';
   const rendered = role === 'assistant' ? renderMarkdown(content) : escapeHtml(content);
   const imgHtml = imageDataUrl ? '<img class="message-image" src="' + imageDataUrl + '" alt="attached image">' : '';
-  const speakBtn = role === 'assistant'
-    ? '<button class="speak-btn" onclick="speakText(' + JSON.stringify(content) + ')" title="Read aloud">🔊</button>'
+
+  // No inline onclick with embedded content -- build buttons as plain elements
+  // and attach real listeners below, so message text never needs to survive
+  // round-tripping through an HTML attribute string.
+  const actionsHtml = role === 'assistant'
+    ? '<button class="speak-btn speak-action" title="Read aloud">🔊</button><button class="speak-btn copy-action" title="Copy response">⎘</button>'
     : '';
-  const copyBtn = role === 'assistant'
-    ? '<button class="speak-btn" onclick="copyToClipboard(' + JSON.stringify(content) + ', 'Copied')" title="Copy response">⎘</button>'
-    : '';
-  div.innerHTML = '<div class="message-bubble">' + imgHtml + rendered + '</div><span class="message-meta">' + metaLabel + ' · ' + time + ' ' + speakBtn + copyBtn + '</span>';
+
+  div.innerHTML = '<div class="message-bubble">' + imgHtml + rendered + '</div><span class="message-meta">' + metaLabel + ' · ' + time + ' ' + actionsHtml + '</span>';
+
+  if (role === 'assistant') {
+    const speakBtnEl = div.querySelector('.speak-action');
+    const copyBtnEl = div.querySelector('.copy-action');
+    if (speakBtnEl) speakBtnEl.addEventListener('click', function() { speakText(content); });
+    if (copyBtnEl) copyBtnEl.addEventListener('click', function() { copyToClipboard(content, 'Copied'); });
+  }
+
   messages.appendChild(div);
   messages.scrollTop = messages.scrollHeight;
-  // Auto-speak assistant messages
+
   if (role === 'assistant' && autoSpeak) {
     speakText(content);
   }
