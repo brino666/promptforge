@@ -830,6 +830,13 @@ function openMemoryPanel() {
   document.getElementById('memoryListView').classList.add('visible');
   memoryInfoVisible = false;
   document.getElementById('memoryInfoBtn').classList.remove('active');
+  // Default to fed view when opening -- shows what's currently relevant
+  // Full history is available via the toggle once memories have loaded
+  memoryViewMode = 'fed';
+  var fedBtn = document.getElementById('memFedBtn');
+  var allBtn = document.getElementById('memAllBtn');
+  if (fedBtn) { fedBtn.style.background = 'var(--accent)'; fedBtn.style.color = '#0a0a0a'; }
+  if (allBtn) { allBtn.style.background = 'transparent'; allBtn.style.color = 'var(--muted)'; }
   loadMemories();
 }
 
@@ -845,100 +852,114 @@ function toggleMemoryInfo() {
   document.getElementById('memoryInfoBtn').classList.toggle('active', memoryInfoVisible);
 }
 
+function setMemoryView(mode) {
+  memoryViewMode = mode;
+  var fedBtn = document.getElementById('memFedBtn');
+  var allBtn = document.getElementById('memAllBtn');
+  if (fedBtn && allBtn) {
+    fedBtn.style.background = mode === 'fed' ? 'var(--accent)' : 'transparent';
+    fedBtn.style.color = mode === 'fed' ? '#0a0a0a' : 'var(--muted)';
+    allBtn.style.background = mode === 'all' ? 'var(--accent)' : 'transparent';
+    allBtn.style.color = mode === 'all' ? '#0a0a0a' : 'var(--muted)';
+  }
+  var toShow = mode === 'fed'
+    ? allMemories.filter(function(m) { return lastInjectedMemoryIds.indexOf(m.id) !== -1; })
+    : allMemories;
+  renderMemoryGroups(toShow);
+}
+
+function renderMemoryCard(memory) {
+  var card = document.createElement('div');
+  card.className = 'memory-card';
+  card.id = 'memory-' + memory.id;
+  var occurrenceText = memory.occurrences > 1 ? 'mentioned ' + memory.occurrences + 'x' : 'mentioned once';
+  var anchorBadge = memory.anchor ? '<span class="confidence-badge high">anchor</span>' : '';
+  var weightBadge = memory.weight === 'major' ? '<span class="confidence-badge medium">major</span>' : '';
+  card.innerHTML =
+    '<div class="memory-card-content">' + escapeHtml(memory.content) + '</div>' +
+    '<div class="memory-card-meta">' +
+      '<div class="memory-card-tags">' +
+        '<span class="confidence-badge ' + memory.confidence + '">' + memory.confidence + '</span>' +
+        weightBadge + anchorBadge +
+        '<span class="occurrences-badge">' + occurrenceText + '</span>' +
+      '</div>' +
+    '</div>';
+  var meta = card.querySelector('.memory-card-meta');
+  var deleteBtn = document.createElement('button');
+  deleteBtn.className = 'memory-delete-btn';
+  deleteBtn.textContent = 'Delete';
+  deleteBtn.addEventListener('click', function() { deleteMemory(memory.id); });
+  meta.appendChild(deleteBtn);
+  return card;
+}
+
+function renderMemoryGroups(memories) {
+  var noResults = document.getElementById('memoryNoResults');
+  var container = document.getElementById('memoryGroups');
+  var emptyEl = document.getElementById('memoryEmpty');
+  container.innerHTML = '';
+  if (!memories || memories.length === 0) {
+    if (memoryViewMode === 'fed') {
+      if (noResults) noResults.style.display = 'block';
+      if (emptyEl) emptyEl.style.display = 'none';
+    } else {
+      if (noResults) noResults.style.display = 'none';
+      if (emptyEl) emptyEl.style.display = 'block';
+    }
+    return;
+  }
+  if (noResults) noResults.style.display = 'none';
+  if (emptyEl) emptyEl.style.display = 'none';
+  var categoryOrder = ['personal','work','plan','idea','lore'];
+  var categoryLabels = { personal: 'Personal', work: 'Work', plan: 'Plans & Goals', idea: 'Ideas', lore: 'Lore' };
+  var grouped = {};
+  memories.forEach(function(m) {
+    var c = m.category || 'idea';
+    if (!grouped[c]) grouped[c] = [];
+    grouped[c].push(m);
+  });
+  categoryOrder.forEach(function(cat) {
+    if (!grouped[cat] || grouped[cat].length === 0) return;
+    var items = grouped[cat];
+    var group = document.createElement('div');
+    group.className = 'memory-group';
+    group.innerHTML = '<div class="memory-group-label">' + (categoryLabels[cat] || cat) + '<span class="memory-group-count">' + items.length + '</span></div>';
+    items.forEach(function(memory) { group.appendChild(renderMemoryCard(memory)); });
+    container.appendChild(group);
+  });
+}
+
 async function loadMemories() {
   if (chatUserId === 'anonymous') {
     document.getElementById('memoryLoading').style.display = 'none';
     document.getElementById('memoryEmpty').style.display = 'block';
     return;
   }
-
   document.getElementById('memoryLoading').style.display = 'block';
   document.getElementById('memoryEmpty').style.display = 'none';
   document.getElementById('memoryGroups').innerHTML = '';
-
   try {
     const { data: { session } } = await supabaseClient.auth.getSession();
     if (!session) throw new Error('No session');
-
     const res = await fetch('/api/memories', {
       method: 'GET',
-      headers: {
-        'Authorization': 'Bearer ' + session.access_token,
-        'Content-Type': 'application/json',
-      },
+      headers: { 'Authorization': 'Bearer ' + session.access_token, 'Content-Type': 'application/json' },
     });
-
     if (!res.ok) throw new Error('Failed to fetch memories');
     const result = await res.json();
-    const data = result.memories || [];
-
+    allMemories = result.memories || [];
     document.getElementById('memoryLoading').style.display = 'none';
-
-    if (!data || data.length === 0) {
+    if (!allMemories || allMemories.length === 0) {
       document.getElementById('memoryEmpty').style.display = 'block';
       return;
     }
-
-    // Group by category (DB column is category, not type)
-    const categoryOrder = ['personal','work','plan','idea','lore'];
-    const categoryLabels = {
-      personal: '👤 Personal',
-      work: '🛠 Work',
-      plan: '📋 Plans & Goals',
-      idea: '💡 Ideas',
-      lore: '🌐 Lore',
-    };
-
-    const grouped = {};
-    data.forEach(m => {
-      const c = m.category || 'idea';
-      if (!grouped[c]) grouped[c] = [];
-      grouped[c].push(m);
-    });
-
-    const container = document.getElementById('memoryGroups');
-
-    categoryOrder.forEach(cat => {
-      if (!grouped[cat] || grouped[cat].length === 0) return;
-      const items = grouped[cat];
-
-      const group = document.createElement('div');
-      group.className = 'memory-group';
-      group.innerHTML = `
-        <div class="memory-group-label">
-          ${categoryLabels[cat] || cat}
-          <span class="memory-group-count">${items.length}</span>
-        </div>`;
-
-      items.forEach(memory => {
-        const card = document.createElement('div');
-        card.className = 'memory-card';
-        card.id = 'memory-' + memory.id;
-        const occurrenceText = memory.occurrences > 1 ? `mentioned ${memory.occurrences}×` : 'mentioned once';
-        const anchorBadge = memory.anchor ? '<span class="confidence-badge high">⚓ anchor</span>' : '';
-        const weightBadge = memory.weight === 'major' ? '<span class="confidence-badge medium">major</span>' : '';
-        card.innerHTML = `
-          <div class="memory-card-content">${escapeHtml(memory.content)}</div>
-          <div class="memory-card-meta">
-            <div class="memory-card-tags">
-              <span class="confidence-badge ${memory.confidence}">${memory.confidence}</span>
-              ${weightBadge}
-              ${anchorBadge}
-              <span class="occurrences-badge">${occurrenceText}</span>
-            </div>
-            <button class="memory-delete-btn" onclick="deleteMemory('${memory.id}')">Delete</button>
-          </div>`;
-        group.appendChild(card);
-      });
-
-      container.appendChild(group);
-    });
-
+    setMemoryView(memoryViewMode);
   } catch(err) {
     document.getElementById('memoryLoading').style.display = 'none';
     document.getElementById('memoryGroups').innerHTML = '<p style="font-family:var(--font-mono);font-size:12px;color:#ff8888;padding:20px 0;">Failed to load memories. Please try again.</p>';
   }
 }
+
 
 async function deleteMemory(id) {
   try {
@@ -1516,34 +1537,16 @@ function stopListening() {
 async function runDiagnostics() {
   document.getElementById('accountDropdown').classList.remove('open');
   setMode('chat');
-  const now = new Date().toLocaleString('en-US', {
-    weekday: 'long', year: 'numeric', month: 'long',
-    day: 'numeric', hour: '2-digit', minute: '2-digit', timeZoneName: 'short',
-  });
-  // Show the trigger message in chat so it appears as a real exchange
+  // Route through the real chat endpoint -- diagnostics.js is now a pure
+  // stats gatherer and no longer generates a response itself. The chat
+  // endpoint's isGreeting() detection picks up "How are you doing?" and
+  // injects the diagnostic stats context, so the response goes through the
+  // full normal pipeline including memory extraction and chat history.
   const triggerMessage = 'How are you doing?';
-  addMessageToUI('user', triggerMessage);
-  chatHistory.push({ role: 'user', content: triggerMessage });
-  setChatLoading(true);
-  try {
-    const res = await fetch('/api/diagnostics', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ userId: chatUserId, mode: 'full', recentHistory: chatHistory.slice(-4), currentDateTime: now }),
-    });
-    const data = await res.json();
-    if (data.message) {
-      addMessageToUI('assistant', data.message);
-      // Push into chat history so Thais remembers this exchange
-      chatHistory.push({ role: 'assistant', content: data.message });
-      if (autoSpeak) speakText(data.message);
-    }
-  } catch(e) {
-    addMessageToUI('assistant', 'Diagnostic check failed.');
-    chatHistory.pop(); // Remove the user trigger if it failed
-  } finally {
-    setChatLoading(false);
-  }
+  const input = document.getElementById('chatInput');
+  input.value = triggerMessage;
+  autoResizeChatInput(input);
+  await sendChatMessage();
 }
 
 // ── Init on load ────────────────────────────────────────────
