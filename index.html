@@ -410,6 +410,8 @@
   .toast { position: fixed; bottom: 32px; right: 32px; background: var(--accent); color: #000; font-family: var(--font-mono); font-size: 13px; padding: 12px 20px; opacity: 0; transform: translateY(8px); transition: all 0.25s; pointer-events: none; z-index: 300; }
   .toast.show { opacity: 1; transform: translateY(0); }
 
+  .search-tag { font-family: var(--font-mono); font-size: 10px; color: var(--accent); border: 1px solid var(--accent); border-radius: 4px; padding: 1px 6px; margin-right: 6px; opacity: .75; cursor: default; }
+
   /* ── Tool output cards ───────────────────────────────────── */
   .tool-output { margin: 8px 0 4px; padding: 16px; background: var(--surface2); border: 1px solid var(--border); border-radius: 10px; }
   .tool-output-label { font-family: var(--font-mono); font-size: 10px; letter-spacing: .1em; text-transform: uppercase; color: var(--accent); margin-bottom: 10px; }
@@ -1164,7 +1166,7 @@ async function sendChatMessage() {
     const res = await fetch('/api/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Request failed');
-    addMessageToUI('assistant', data.message);
+    addMessageToUI('assistant', data.message, null, data.searchPerformed ? data.searchQuery : null);
     chatHistory.push({ role: 'assistant', content: data.message });
     if (data.workflow && !activeWorkflow) { activeWorkflow = data.workflow; updateWorkflowBadge(data.workflow); }
     if (data.injectedMemoryIds) {
@@ -1207,7 +1209,7 @@ function renderMarkdown(text) {
     .replace(/\n\n/g, '<br><br>').replace(/\n/g, '<br>');
 }
 
-function addMessageToUI(role, content, imageDataUrl) {
+function addMessageToUI(role, content, imageDataUrl, searchQuery) {
   const messages = document.getElementById('chatMessages');
   const div = document.createElement('div');
   div.className = 'chat-message ' + role;
@@ -1215,17 +1217,15 @@ function addMessageToUI(role, content, imageDataUrl) {
   const metaLabel = role === 'user' ? 'You' : 'Thais';
   const rendered = role === 'assistant' ? renderMarkdown(content) : escapeHtml(content);
   const imgHtml = imageDataUrl ? '<img class="message-image" src="' + imageDataUrl + '" alt="attached image">' : '';
+  const searchTag = (role === 'assistant' && searchQuery)
+    ? '<span class="search-tag" title="Searched: ' + escapeHtml(searchQuery) + '">⌕ web</span>'
+    : '';
 
-  // No inline onclick with embedded message content -- building those as HTML
-  // attribute strings breaks the moment the message contains a quote or
-  // apostrophe (very common in normal conversation). Build plain buttons and
-  // attach real listeners below instead, so content never needs to survive
-  // round-tripping through an HTML attribute string.
   const actionsHtml = role === 'assistant'
     ? '<button class="speak-btn speak-action" title="Read aloud">🔊</button><button class="speak-btn copy-action" title="Copy response">⎘</button>'
     : '';
 
-  div.innerHTML = '<div class="message-bubble">' + imgHtml + rendered + '</div><span class="message-meta">' + metaLabel + ' · ' + time + ' ' + actionsHtml + '</span>';
+  div.innerHTML = '<div class="message-bubble">' + imgHtml + rendered + '</div><span class="message-meta">' + metaLabel + ' · ' + time + ' ' + searchTag + actionsHtml + '</span>';
 
   if (role === 'assistant') {
     const speakBtnEl = div.querySelector('.speak-action');

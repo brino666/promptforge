@@ -1185,6 +1185,10 @@ export default async function handler(req, res) {
       if (results && results.length > 0) {
         searchContext = formatSearchResults(results, searchQuery);
         searchPerformed = true;
+      } else {
+        // Search was attempted but returned nothing -- tell Thais explicitly so
+        // she discloses this rather than silently falling back to training data.
+        searchContext = '[Web search was attempted for "' + searchQuery + '" but returned no results. Be transparent about this -- do not present training data as if it were current information.]';
       }
     }
 
