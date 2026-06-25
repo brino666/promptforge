@@ -657,10 +657,13 @@
     <div class="memory-list-view" id="memoryListView">
       <div style="display:flex;gap:6px;margin-bottom:16px;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:4px;">
         <button id="memFedBtn" onclick="setMemoryView('fed')" style="flex:1;padding:7px;border:none;border-radius:6px;background:var(--accent);color:#0a0a0a;font-family:var(--font-mono);font-size:11px;letter-spacing:.06em;cursor:pointer;">
-          What she's thinking
+          Active
+        </button>
+        <button id="memRecentBtn" onclick="setMemoryView('recent')" style="flex:1;padding:7px;border:none;border-radius:6px;background:transparent;color:var(--muted);font-family:var(--font-mono);font-size:11px;letter-spacing:.06em;cursor:pointer;">
+          Recent
         </button>
         <button id="memAllBtn" onclick="setMemoryView('all')" style="flex:1;padding:7px;border:none;border-radius:6px;background:transparent;color:var(--muted);font-family:var(--font-mono);font-size:11px;letter-spacing:.06em;cursor:pointer;">
-          Full history
+          All
         </button>
       </div>
       <div class="memory-loading" id="memoryLoading">Loading your memories...</div>
@@ -869,17 +872,41 @@ function toggleMemoryInfo() {
 function setMemoryView(mode) {
   memoryViewMode = mode;
   var fedBtn = document.getElementById('memFedBtn');
+  var recentBtn = document.getElementById('memRecentBtn');
   var allBtn = document.getElementById('memAllBtn');
-  if (fedBtn && allBtn) {
-    fedBtn.style.background = mode === 'fed' ? 'var(--accent)' : 'transparent';
-    fedBtn.style.color = mode === 'fed' ? '#0a0a0a' : 'var(--muted)';
-    allBtn.style.background = mode === 'all' ? 'var(--accent)' : 'transparent';
-    allBtn.style.color = mode === 'all' ? '#0a0a0a' : 'var(--muted)';
+  var accent = 'var(--accent)', none = 'transparent', dark = '#0a0a0a', muted = 'var(--muted)';
+  if (fedBtn) { fedBtn.style.background = mode === 'fed' ? accent : none; fedBtn.style.color = mode === 'fed' ? dark : muted; }
+  if (recentBtn) { recentBtn.style.background = mode === 'recent' ? accent : none; recentBtn.style.color = mode === 'recent' ? dark : muted; }
+  if (allBtn) { allBtn.style.background = mode === 'all' ? accent : none; allBtn.style.color = mode === 'all' ? dark : muted; }
+
+  if (mode === 'recent') {
+    // Flat chronological feed — last 30 memories across all categories, no grouping
+    var recent = allMemories.slice().sort(function(a, b) {
+      return new Date(b.updated_at) - new Date(a.updated_at);
+    }).slice(0, 30);
+    renderMemoryFlat(recent);
+    return;
   }
+
   var toShow = mode === 'fed'
     ? allMemories.filter(function(m) { return lastInjectedMemoryIds.indexOf(m.id) !== -1; })
     : allMemories;
   renderMemoryGroups(toShow);
+}
+
+function renderMemoryFlat(memories) {
+  var container = document.getElementById('memoryContainer');
+  if (!container) return;
+  container.innerHTML = '';
+  if (!memories || memories.length === 0) {
+    container.innerHTML = '<div class="memory-empty" style="display:block;">No memories yet.</div>';
+    return;
+  }
+  var label = document.createElement('div');
+  label.style.cssText = 'font-size:11px;font-family:var(--font-mono);letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:12px;';
+  label.textContent = 'Last ' + memories.length + ' — newest first';
+  container.appendChild(label);
+  memories.forEach(function(m) { container.appendChild(renderMemoryCard(m)); });
 }
 
 function renderMemoryCard(memory) {
@@ -1225,7 +1252,10 @@ async function sendChatMessage() {
     if (data.injectedMemoryIds) {
       lastInjectedMemoryIds = data.injectedMemoryIds;
       if (document.getElementById('memoryPanel').classList.contains('open')) {
-        loadMemories();
+        loadMemories().then(function() {
+          // Auto-switch to Recent after each turn so new memories are visible immediately
+          setMemoryView('recent');
+        });
       }
     }
     if (data.toolOutput) renderToolOutput(data.toolOutput);
