@@ -3,7 +3,6 @@
 // With web search capability via Brave Search API
 
 import Anthropic from '@anthropic-ai/sdk';
-import { getMemoryStats } from './diagnostics.js';
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
@@ -1026,6 +1025,46 @@ async function extractAndStoreMemory(userId, userMessage, assistantMessage, conv
   } catch (err) {
     console.error('[extraction error]', err.message);
     return { suggestQuestion: null, formations: [] };
+  }
+}
+
+// -- Memory stats (inlined from diagnostics.js to avoid cross-file import) -----
+async function getMemoryStats(userId) {
+  try {
+    const memories = await sbFetch(
+      '/memories?user_id=eq.' + encodeURIComponent(userId) +
+      '&superseded=eq.false&order=updated_at.desc&limit=200'
+    );
+    if (!memories || memories.length === 0) {
+      return { total: 0, categories: {}, confidence: {}, sources: {}, anchors: 0, recent: [] };
+    }
+    const stats = {
+      total: memories.length,
+      categories: {},
+      confidence: { high: 0, medium: 0, low: 0 },
+      sources: { stated: 0, inferred: 0 },
+      anchors: 0,
+      recent: [],
+      oldest: null,
+      newest: null,
+    };
+    ['personal','work','plan','idea','lore'].forEach(function(c) { stats.categories[c] = 0; });
+    memories.forEach(function(m) {
+      if (stats.categories[m.category] !== undefined) stats.categories[m.category]++;
+      if (stats.confidence[m.confidence] !== undefined) stats.confidence[m.confidence]++;
+      if (m.source === 'stated') stats.sources.stated++; else stats.sources.inferred++;
+      if (m.anchor) stats.anchors++;
+    });
+    stats.recent = memories.slice(0, 5).map(function(m) {
+      return '[' + m.category + '/' + m.weight + '] ' + m.content;
+    });
+    const dates = memories.map(function(m) { return new Date(m.updated_at); });
+    stats.oldest = new Date(Math.min.apply(null, dates)).toLocaleDateString();
+    stats.newest = new Date(Math.max.apply(null, dates)).toLocaleDateString();
+    return stats;
+  } catch (err) {
+    console.error('[getMemoryStats]', err.message);
+    return { total: 0, error: err.message };
   }
 }
 
