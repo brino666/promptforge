@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Thais — translate to AI</title>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
 <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -408,6 +409,15 @@
   /* ── Toast ───────────────────────────────────────────────── */
   .toast { position: fixed; bottom: 32px; right: 32px; background: var(--accent); color: #000; font-family: var(--font-mono); font-size: 13px; padding: 12px 20px; opacity: 0; transform: translateY(8px); transition: all 0.25s; pointer-events: none; z-index: 300; }
   .toast.show { opacity: 1; transform: translateY(0); }
+
+  /* ── Tool output cards ───────────────────────────────────── */
+  .tool-output { margin: 8px 0 4px; padding: 16px; background: var(--surface2); border: 1px solid var(--border); border-radius: 10px; }
+  .tool-output-label { font-family: var(--font-mono); font-size: 10px; letter-spacing: .1em; text-transform: uppercase; color: var(--accent); margin-bottom: 10px; }
+  .tool-output canvas { max-width: 100%; border-radius: 6px; }
+  .tool-output .calc-result { font-family: var(--font-mono); font-size: 22px; font-weight: 700; color: var(--accent); }
+  .tool-output .calc-label { font-size: 12px; color: var(--muted); margin-top: 4px; }
+  .tool-output .file-download { display: inline-flex; align-items: center; gap: 8px; margin-top: 8px; padding: 8px 16px; background: var(--accent); color: #000; font-family: var(--font-mono); font-size: 12px; font-weight: 600; border-radius: 6px; text-decoration: none; cursor: pointer; border: none; }
+  .tool-output .file-download:hover { opacity: .85; }
 
   .error-msg { background: #1a0a0a; border: 1px solid #ff4444; color: #ff8888; font-family: var(--font-mono); font-size: 13px; padding: 16px 20px; margin-top: 16px; display: none; }
   .error-msg.visible { display: block; }
@@ -1163,6 +1173,7 @@ async function sendChatMessage() {
         loadMemories();
       }
     }
+    if (data.toolOutput) renderToolOutput(data.toolOutput);
   } catch (err) {
     addMessageToUI('assistant', 'Something went wrong. Please try again.');
     chatHistory.pop();
@@ -1229,6 +1240,99 @@ function addMessageToUI(role, content, imageDataUrl) {
   if (role === 'assistant' && autoSpeak) {
     speakText(content);
   }
+}
+
+function renderToolOutput(toolOutput) {
+  if (!toolOutput) return;
+  const messages = document.getElementById('chatMessages');
+  const wrap = document.createElement('div');
+  wrap.className = 'tool-output';
+
+  if (toolOutput.type === 'chart') {
+    const p = toolOutput.payload;
+    const label = document.createElement('div');
+    label.className = 'tool-output-label';
+    label.textContent = p.title || 'Chart';
+    wrap.appendChild(label);
+
+    const canvas = document.createElement('canvas');
+    canvas.height = 260;
+    wrap.appendChild(canvas);
+
+    // Build dataset colors -- default to accent palette if not specified
+    const PALETTE = ['#e8ff47','#ff6b35','#4ecdc4','#a8e6cf','#ff8b94','#c7f464'];
+    const datasets = (p.datasets || []).map(function(ds, i) {
+      const color = ds.color || PALETTE[i % PALETTE.length];
+      const isLine = p.type === 'line';
+      return Object.assign({}, ds, {
+        backgroundColor: isLine ? color + '33' : color,
+        borderColor: color,
+        borderWidth: 2,
+        pointBackgroundColor: color,
+      });
+    });
+
+    new Chart(canvas, {
+      type: p.type,
+      data: { labels: p.labels, datasets: datasets },
+      options: {
+        responsive: true,
+        plugins: {
+          legend: { labels: { color: '#f0f0f0', font: { family: 'IBM Plex Mono' } } },
+          title: { display: false },
+        },
+        scales: (p.type === 'pie' || p.type === 'doughnut' || p.type === 'radar') ? {} : {
+          x: { ticks: { color: '#888' }, grid: { color: '#2a2a2a' } },
+          y: { ticks: { color: '#888' }, grid: { color: '#2a2a2a' } },
+        },
+      },
+    });
+
+    if (p.explanation) {
+      const note = document.createElement('div');
+      note.className = 'calc-label';
+      note.style.marginTop = '10px';
+      note.textContent = p.explanation;
+      wrap.appendChild(note);
+    }
+
+  } else if (toolOutput.type === 'calculation') {
+    const label = document.createElement('div');
+    label.className = 'tool-output-label';
+    label.textContent = toolOutput.label || 'Calculation';
+    wrap.appendChild(label);
+
+    const val = document.createElement('div');
+    val.className = 'calc-result';
+    if (toolOutput.result && toolOutput.result.success) {
+      const r = toolOutput.result.result;
+      val.textContent = (typeof r === 'object' ? JSON.stringify(r, null, 2) : String(r)) +
+        (toolOutput.unit ? ' ' + toolOutput.unit : '');
+    } else {
+      val.style.color = '#ff6b6b';
+      val.textContent = 'Error: ' + ((toolOutput.result && toolOutput.result.error) || 'unknown');
+    }
+    wrap.appendChild(val);
+
+  } else if (toolOutput.type === 'file') {
+    const p = toolOutput.payload;
+    const label = document.createElement('div');
+    label.className = 'tool-output-label';
+    label.textContent = p.description || 'File ready';
+    wrap.appendChild(label);
+
+    const blob = new Blob([p.content], { type: p.mimeType || 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const btn = document.createElement('a');
+    btn.className = 'file-download';
+    btn.href = url;
+    btn.download = p.filename || 'download';
+    btn.textContent = '⬇ ' + (p.filename || 'Download file');
+    wrap.appendChild(btn);
+  }
+
+  messages.appendChild(wrap);
+  messages.scrollTop = messages.scrollHeight;
 }
 
 function setChatLoading(loading) {

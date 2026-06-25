@@ -6,6 +6,83 @@ import Anthropic from '@anthropic-ai/sdk';
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
+// ── Tool definitions ─────────────────────────────────────────
+const TOOLS = [
+  {
+    name: 'render_chart',
+    description: 'Render a chart or data visualization. Use when the user asks for a graph, chart, plot, or visual representation of data. Returns a Chart.js config object that the frontend renders as a canvas.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        type: {
+          type: 'string',
+          enum: ['bar', 'line', 'pie', 'doughnut', 'scatter', 'radar'],
+          description: 'Chart type',
+        },
+        title: { type: 'string', description: 'Chart title' },
+        labels: { type: 'array', items: { type: 'string' }, description: 'X-axis labels or category names' },
+        datasets: {
+          type: 'array',
+          description: 'One or more data series',
+          items: {
+            type: 'object',
+            properties: {
+              label: { type: 'string' },
+              data: { type: 'array', items: { type: 'number' } },
+              color: { type: 'string', description: 'Optional hex color e.g. #e8ff47' },
+            },
+            required: ['label', 'data'],
+          },
+        },
+        explanation: { type: 'string', description: 'Brief explanation of what this chart shows, shown below it' },
+      },
+      required: ['type', 'title', 'labels', 'datasets'],
+    },
+  },
+  {
+    name: 'create_file',
+    description: 'Create a downloadable file. Use when the user asks to generate, save, or export something as a file -- HTML pages, CSS, JavaScript, JSON data, CSV, plain text, markdown, etc.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        filename: { type: 'string', description: 'Filename including extension, e.g. "index.html" or "data.csv"' },
+        content: { type: 'string', description: 'Full file content as a string' },
+        mimeType: { type: 'string', description: 'MIME type, e.g. "text/html", "text/csv", "application/json"' },
+        description: { type: 'string', description: 'One sentence describing what this file is' },
+      },
+      required: ['filename', 'content', 'mimeType'],
+    },
+  },
+  {
+    name: 'run_calculation',
+    description: 'Perform a precise numeric calculation, statistical computation, or formula evaluation. Use when exact numbers matter -- unit conversions, compound interest, statistics, engineering formulas, etc.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        expression: { type: 'string', description: 'JavaScript expression to evaluate. Must produce a numeric or object result. Only Math built-ins available, no I/O.' },
+        label: { type: 'string', description: 'What is being calculated, shown to the user' },
+        unit: { type: 'string', description: 'Unit of the result, if applicable e.g. "kg", "%", "USD"' },
+      },
+      required: ['expression', 'label'],
+    },
+  },
+];
+
+function runCalculation(expression) {
+  try {
+    const fn = new Function('Math', '"use strict"; return (' + expression + ');');
+    return { success: true, result: fn(Math) };
+  } catch (e) {
+    try {
+      const fn2 = new Function('Math', '"use strict"; ' + expression);
+      return { success: true, result: fn2(Math) ?? null };
+    } catch (e2) {
+      return { success: false, error: e2.message };
+    }
+  }
+}
+
+
 const SUPABASE_URL = process.env.supabase_url || process.env.SUPABASE_URL;
 const SUPABASE_SERVICE_KEY = process.env.supabase_ret_key || process.env.SUPABASE_SERVICE_ROLE_KEY;
 const BRAVE_KEY = process.env.BRAVE_SEARCH_KEY;
@@ -1139,11 +1216,54 @@ export default async function handler(req, res) {
       max_tokens: 2000,
       system: systemPrompt,
       messages: messages,
+      tools: TOOLS,
     });
 
-    const assistantMessage = (response.content[0] && response.content[0].text)
-      ? response.content[0].text
-      : '';
+    // Handle tool use -- if Thais calls a tool, execute it and send results
+    // back for a final text reply so the conversation stays coherent.
+    let assistantMessage = '';
+    let toolOutput = null; // chart config, file, or calculation sent to frontend
+
+    if (response.stop_reason === 'tool_use') {
+      const toolUseBlock = response.content.find(function(b) { return b.type === 'tool_use'; });
+      const textBeforeTool = response.content.find(function(b) { return b.type === 'text'; });
+
+      if (toolUseBlock) {
+        let toolResult;
+        if (toolUseBlock.name === 'render_chart') {
+          toolOutput = { type: 'chart', payload: toolUseBlock.input };
+          toolResult = 'Chart rendered successfully.';
+        } else if (toolUseBlock.name === 'create_file') {
+          toolOutput = { type: 'file', payload: toolUseBlock.input };
+          toolResult = 'File "' + toolUseBlock.input.filename + '" created and ready to download.';
+        } else if (toolUseBlock.name === 'run_calculation') {
+          const calc = runCalculation(toolUseBlock.input.expression);
+          toolOutput = { type: 'calculation', label: toolUseBlock.input.label, unit: toolUseBlock.input.unit || '', result: calc };
+          toolResult = calc.success
+            ? String(calc.result) + (toolUseBlock.input.unit ? ' ' + toolUseBlock.input.unit : '')
+            : 'Calculation error: ' + calc.error;
+        }
+
+        // Follow-up call: give Thais the tool result so she can respond naturally
+        const followUp = await anthropic.messages.create({
+          model: 'claude-sonnet-4-6',
+          max_tokens: 1000,
+          system: systemPrompt,
+          messages: messages.concat([
+            { role: 'assistant', content: response.content },
+            { role: 'user', content: [{ type: 'tool_result', tool_use_id: toolUseBlock.id, content: toolResult }] },
+          ]),
+          tools: TOOLS,
+        });
+
+        assistantMessage = (textBeforeTool ? textBeforeTool.text + '\n\n' : '') +
+          ((followUp.content[0] && followUp.content[0].text) ? followUp.content[0].text : '');
+      }
+    } else {
+      assistantMessage = (response.content[0] && response.content[0].text)
+        ? response.content[0].text
+        : '';
+    }
 
     // Extract memory
     let suggestQuestion = null;
@@ -1218,6 +1338,7 @@ export default async function handler(req, res) {
       memoryFormations: memoryFormations,
       injectedMemoryIds: memories.map(function(m) { return m.id; }),
       sessionId: sessionId,
+      toolOutput: toolOutput || null,
     });
 
   } catch (error) {
