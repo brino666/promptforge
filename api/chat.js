@@ -66,6 +66,18 @@ const TOOLS = [
       required: ['expression', 'label'],
     },
   },
+  {
+    name: 'web_search',
+    description: 'Search the web for current information. Use this whenever the question involves recent events, current prices, live data, people, companies, products, news, or anything that may have changed since your training cutoff (August 2025). Default to searching when uncertain -- do not rely on training data for things that could be outdated. You can call this multiple times in one turn to refine results.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: 'Search query -- concise keywords, 2-7 words, no punctuation' },
+        reason: { type: 'string', description: 'One sentence on why live search is needed here' },
+      },
+      required: ['query'],
+    },
+  },
 ];
 
 function runCalculation(expression) {
@@ -1156,41 +1168,10 @@ export default async function handler(req, res) {
       }
     }
 
-    // Detect if search is needed using smart question check
-    let searchContext = '';
-    let searchPerformed = false;
-    let searchQuery = '';
-
-    const searchNeeded = await shouldSearch(message, memoryContext, currentDateTime);
-    if (searchNeeded) {
-      // Extract a clean search query -- don't send raw conversational message to Brave
-      try {
-        const queryExtract = await anthropic.messages.create({
-          model: 'claude-haiku-4-5-20251001',
-          max_tokens: 30,
-          messages: [{
-            role: 'user',
-            content: 'Convert this message into a short web search query (5 words max, no punctuation, just keywords): ' + message,
-          }],
-        });
-        searchQuery = (queryExtract.content[0] && queryExtract.content[0].text)
-          ? queryExtract.content[0].text.trim().replace(/["\']/g, '')
-          : message.replace(/[?!]/g, '').trim();
-      } catch (qErr) {
-        // Fallback: strip punctuation and take first 60 chars
-        searchQuery = message.replace(/[?!.,]/g, '').trim().slice(0, 60);
-      }
-
-      const results = await performSearch(searchQuery, 7);
-      if (results && results.length > 0) {
-        searchContext = formatSearchResults(results, searchQuery);
-        searchPerformed = true;
-      } else {
-        // Search was attempted but returned nothing -- tell Thais explicitly so
-        // she discloses this rather than silently falling back to training data.
-        searchContext = '[Web search was attempted for "' + searchQuery + '" but returned no results. Be transparent about this -- do not present training data as if it were current information.]';
-      }
-    }
+    // Search is now a tool Thais calls herself (web_search in TOOLS) --
+    // no pre-processing needed here. searchContext/searchPerformed/searchQuery
+    // are set inside the tool loop below after the main response.
+    const searchContext = '';
 
     // Detect workflow
     let activeWorkflow = WORKFLOWS.general;
@@ -1236,18 +1217,38 @@ export default async function handler(req, res) {
       tools: TOOLS,
     });
 
-    // Handle tool use -- if Thais calls a tool, execute it and send results
-    // back for a final text reply so the conversation stays coherent.
+    // Tool loop -- Thais can call tools (including web_search) multiple times
+    // before settling on a final text response. Cap at 6 iterations to prevent
+    // runaway loops while still allowing search → refine → search again patterns.
     let assistantMessage = '';
-    let toolOutput = null; // chart config, file, or calculation sent to frontend
+    let toolOutput = null;
+    let currentResponse = response;
+    let turnMessages = messages.slice();
+    let searchQuery = '';
+    let searchPerformed = false;
+    const MAX_TOOL_TURNS = 6;
+    let toolTurns = 0;
 
-    if (response.stop_reason === 'tool_use') {
-      const toolUseBlock = response.content.find(function(b) { return b.type === 'tool_use'; });
-      const textBeforeTool = response.content.find(function(b) { return b.type === 'text'; });
+    while (currentResponse.stop_reason === 'tool_use' && toolTurns < MAX_TOOL_TURNS) {
+      toolTurns++;
+      const toolUseBlocks = currentResponse.content.filter(function(b) { return b.type === 'tool_use'; });
+      if (!toolUseBlocks.length) break;
 
-      if (toolUseBlock) {
+      const toolResults = [];
+      for (const toolUseBlock of toolUseBlocks) {
         let toolResult;
-        if (toolUseBlock.name === 'render_chart') {
+
+        if (toolUseBlock.name === 'web_search') {
+          const query = toolUseBlock.input.query || '';
+          searchQuery = query;
+          const results = BRAVE_KEY ? await performSearch(query, 7) : null;
+          if (results && results.length > 0) {
+            searchPerformed = true;
+            toolResult = formatSearchResults(results, query);
+          } else {
+            toolResult = '[Search for "' + query + '" returned no results. Be transparent about this.]';
+          }
+        } else if (toolUseBlock.name === 'render_chart') {
           toolOutput = { type: 'chart', payload: toolUseBlock.input };
           toolResult = 'Chart rendered successfully.';
         } else if (toolUseBlock.name === 'create_file') {
@@ -1259,28 +1260,31 @@ export default async function handler(req, res) {
           toolResult = calc.success
             ? String(calc.result) + (toolUseBlock.input.unit ? ' ' + toolUseBlock.input.unit : '')
             : 'Calculation error: ' + calc.error;
+        } else {
+          toolResult = 'Unknown tool.';
         }
 
-        // Follow-up call: give Thais the tool result so she can respond naturally
-        const followUp = await anthropic.messages.create({
-          model: 'claude-sonnet-4-6',
-          max_tokens: 1000,
-          system: systemPrompt,
-          messages: messages.concat([
-            { role: 'assistant', content: response.content },
-            { role: 'user', content: [{ type: 'tool_result', tool_use_id: toolUseBlock.id, content: toolResult }] },
-          ]),
-          tools: TOOLS,
-        });
-
-        assistantMessage = (textBeforeTool ? textBeforeTool.text + '\n\n' : '') +
-          ((followUp.content[0] && followUp.content[0].text) ? followUp.content[0].text : '');
+        toolResults.push({ type: 'tool_result', tool_use_id: toolUseBlock.id, content: toolResult });
       }
-    } else {
-      assistantMessage = (response.content[0] && response.content[0].text)
-        ? response.content[0].text
-        : '';
+
+      turnMessages = turnMessages.concat([
+        { role: 'assistant', content: currentResponse.content },
+        { role: 'user', content: toolResults },
+      ]);
+
+      currentResponse = await anthropic.messages.create({
+        model: 'claude-sonnet-4-6',
+        max_tokens: 2000,
+        system: systemPrompt,
+        messages: turnMessages,
+        tools: TOOLS,
+      });
     }
+
+    assistantMessage = currentResponse.content
+      .filter(function(b) { return b.type === 'text'; })
+      .map(function(b) { return b.text; })
+      .join('\n\n');
 
     // Extract memory
     let suggestQuestion = null;
