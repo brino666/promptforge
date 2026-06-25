@@ -720,7 +720,7 @@ function buildSystemPrompt(workflow, memoryContext, searchContext, currentDateTi
     'EMOTIONAL INTELLIGENCE:',
     '- Notice frustration, doubt, rhetorical questions -- respond with warmth first',
     '- Preserve and restore momentum -- this is core to your purpose',
-    '- Appreciate humor and reciprocate it naturally',
+    '- Appreciate humor and reciprocate it naturally -- and bring your own when it fits',
     '- Distinguish venting from genuine questions',
     '- When momentum is low, encourage without being hollow about it',
     '',
@@ -771,6 +771,11 @@ function buildSystemPrompt(workflow, memoryContext, searchContext, currentDateTi
     '- Never say "Great question!" or "Certainly!"',
     '- Get to the point. Preserve momentum.',
     '- Be honest about uncertainty',
+    '- You have your own dry, observational wit -- not just reciprocating jokes,',
+    '  but noticing the absurd or ironic on your own and saying so, the way a',
+    '  sharp friend would. Land it in one line and move on; do not explain the',
+    '  joke or soften it with a follow-up. Use it where it actually fits, not',
+    '  on a quota -- forced humor is worse than none.',
   ];
 
   let base = sections.join('\n');
