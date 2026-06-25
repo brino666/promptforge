@@ -3,6 +3,7 @@
 // With web search capability via Brave Search API
 
 import Anthropic from '@anthropic-ai/sdk';
+import { getMemoryStats } from './diagnostics.js';
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
@@ -1205,19 +1206,9 @@ export default async function handler(req, res) {
     let diagnosticContext = '';
     if (isGreeting(message) && userId !== 'anonymous') {
       try {
-        const diagResponse = await fetch(
-          (process.env.VERCEL_URL ? 'https://' + process.env.VERCEL_URL : 'https://promptforge-n3yh.vercel.app') + '/api/diagnostics',
-          {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ userId: userId }),
-          }
-        );
-        if (diagResponse.ok) {
-          const diagData = await diagResponse.json();
-          if (diagData.stats) {
-            const s = diagData.stats;
-            diagnosticContext = isOwner
+        const s = await getMemoryStats(userId);
+        if (s) {
+          diagnosticContext = isOwner
               ? [
                   '',
                   'SELF-DIAGNOSTIC DATA (someone just asked how you are doing):',
@@ -1247,7 +1238,6 @@ export default async function handler(req, res) {
                   'confidence scores, or any implementation detail. Those mean nothing to',
                   'this user and are not their concern.',
                 ].join('\n');
-          }
         }
       } catch (diagErr) {
         console.error('[greeting diagnostic error]', diagErr.message);
