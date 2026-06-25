@@ -693,7 +693,7 @@ export default async function handler(req, res) {
       return res.status(200).json({ success: true, memory: inserted[0] || null });
     } catch (err) {
       console.error('[memories POST] error:', err.message);
-      return res.status(500).json({ error: 'Failed to create memory' });
+      return res.status(500).json({ error: 'Failed to create memory', detail: err.message });
     }
   }
 

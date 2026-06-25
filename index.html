@@ -1085,7 +1085,10 @@ async function submitLore() {
       headers: { 'Authorization': 'Bearer ' + session.access_token, 'Content-Type': 'application/json' },
       body: JSON.stringify({ category, content, anchor, weight: 'major', source: 'stated', confidence: 'high' }),
     });
-    if (!res.ok) throw new Error('Failed');
+    if (!res.ok) {
+      const errData = await res.json().catch(function() { return {}; });
+      throw new Error(errData.detail || errData.error || 'Failed');
+    }
     showToast('Lore saved');
     document.getElementById('loreContent').value = '';
     document.getElementById('addLoreForm').style.display = 'none';
