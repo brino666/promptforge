@@ -922,11 +922,6 @@ function buildSystemPrompt(workflow, memoryContext, searchContext, currentDateTi
 
 async function extractAndStoreMemory(userId, userMessage, assistantMessage, conversationHistory, sequence, knownMemories) {
   try {
-    // Only extract from the USER's side of the conversation. Thais's responses
-    // are derived from existing memories and knowledge — extracting from them
-    // is exactly what caused recall→paraphrase→new memory loops. When Thais
-    // paraphrases a memory in her reply, that paraphrase must never become a
-    // new stored memory. Only what the user actually said can be new information.
     const userTurns = conversationHistory
       .slice(-6)
       .filter(function(m) { return m.role === 'user'; })
@@ -934,14 +929,17 @@ async function extractAndStoreMemory(userId, userMessage, assistantMessage, conv
       .concat(['User: ' + userMessage])
       .join('\n');
 
+    // knownList excludes "generated" source so Thais's own creative output
+    // doesn't block future similar ideas from landing
     const knownList = (knownMemories || [])
+      .filter(function(m) { return m.source !== 'generated'; })
       .slice(0, 60)
       .map(function(m) { return '- ' + m.content; })
       .join('\n');
 
     const extractionPrompt = [
       'You are the memory extraction system for Thais, an AI workspace.',
-      'Extract specific, useful memories from the USER\'s messages only.',
+      'Extract memories from two sources with different rules for each.',
       '',
       'CATEGORIES:',
       '- personal: who the person is, their life, identity, relationships, habits',
@@ -952,32 +950,30 @@ async function extractAndStoreMemory(userId, userMessage, assistantMessage, conv
       '  defining experiences, background, the fabric of who they are',
       '',
       'WEIGHTS: major (significant) or minor (useful detail)',
-      'SOURCE: stated (said directly) or inferred (you concluded it from what the user said)',
       'ANCHOR: true only for core orientation points -- use very sparingly',
       '',
-      'ALREADY KNOWN -- do NOT re-extract any of these:',
+      'ALREADY KNOWN (from user) -- do NOT re-extract any of these:',
       knownList || '(nothing on file yet)',
       '',
-      '═══ VERBATIM RULE (most important rule) ═══',
-      'Memories are stored as the user\'s EXACT WORDS. Not your summary. Not your paraphrase.',
-      'Copy what they said, word for word.',
+      '═══ SOURCE A: USER MESSAGES — verbatim rule ═══',
+      'source must be "stated" or "inferred".',
+      'STATED: Copy the user\'s EXACT WORDS. Do not rephrase or clean up.',
+      'INFERRED: Quote the triggering statement, append inference in brackets.',
+      'Example: "I\'ve been doing this for 20 years [inferred: highly experienced]"',
       '',
-      'STATED: Copy the user\'s exact phrasing from the conversation. If they said',
-      '"I\'m building an app called Thais" — store exactly "I\'m building an app called Thais".',
-      'Do NOT clean it up, polish it, or rephrase it as a clean declarative sentence.',
+      'WHY VERBATIM MATTERS: Thais paraphrases naturally on recall. If you store',
+      'your paraphrase, her recall paraphrases your paraphrase, a second memory lands,',
+      'dedup misses it because the wording differs. Verbatim breaks this loop.',
       '',
-      'INFERRED: Quote the specific thing they said that led to your inference, then',
-      'append your inference in brackets. Example:',
-      '"I\'ve been doing this for 20 years [inferred: highly experienced in this domain]"',
-      'Do NOT rewrite the whole thing in your own words.',
+      '═══ SOURCE B: THAIS\'S RESPONSE — originals only ═══',
+      'source must be "generated". ONLY extract if Thais said something she CREATED:',
+      '- A joke or witty observation she originated',
+      '- A new idea, metaphor, or framing she invented',
+      '- A creative synthesis that didn\'t come from the user',
+      'DO NOT extract if she is recalling, paraphrasing, or responding to the user.',
+      'When in doubt, skip. Store her exact words verbatim.',
       '',
-      'WHY THIS MATTERS: Thais paraphrases memories naturally when she recalls them.',
-      'If you store your own paraphrase, then her recall paraphrases YOUR paraphrase,',
-      'and that second version gets stored again — differently worded — and dedup misses it.',
-      'Verbatim storage breaks this loop. One statement → one memory, no matter how many times recalled.',
-      '',
-      'BE SPARING WITH INFERENCES. Only extract an inferred memory when it is',
-      'genuinely useful and reasonably confident. Weak inferences accumulate fast.',
+      'BE SPARING WITH INFERENCES. Weak inferences accumulate fast.',
       '',
       'SPECIFICITY RULE: Never store summaries when specifics exist.',
       'Bad: "user is building a product"',
@@ -986,8 +982,11 @@ async function extractAndStoreMemory(userId, userMessage, assistantMessage, conv
       'USER MESSAGES:',
       userTurns,
       '',
+      'THAIS\'S LAST RESPONSE:',
+      'Thais: ' + assistantMessage,
+      '',
       'Respond ONLY with valid JSON, no markdown:',
-      '{"extractions":[{"category":"personal|work|idea|plan|lore","weight":"major|minor","content":"exact user words","source":"stated|inferred","confidence":"high|medium|low","anchor":false}],"suggestQuestion":null}',
+      '{"extractions":[{"category":"personal|work|idea|plan|lore","weight":"major|minor","content":"exact words","source":"stated|inferred|generated","confidence":"high|medium|low","anchor":false}],"suggestQuestion":null}',
       '',
       'If nothing worth extracting: {"extractions":[],"suggestQuestion":null}',
       'Max 4 extractions. Be specific. Look for lore.',
