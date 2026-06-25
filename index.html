@@ -659,6 +659,9 @@
         <button id="memRecentBtn" onclick="setMemoryView('recent')" style="flex:1;padding:7px;border:none;border-radius:6px;background:var(--accent);color:#0a0a0a;font-family:var(--font-mono);font-size:11px;letter-spacing:.06em;cursor:pointer;">
           Recent
         </button>
+        <button id="memFocusBtn" onclick="setMemoryView('focus')" style="flex:1;padding:7px;border:none;border-radius:6px;background:transparent;color:var(--muted);font-family:var(--font-mono);font-size:11px;letter-spacing:.06em;cursor:pointer;">
+          Focus
+        </button>
         <button id="memAllBtn" onclick="setMemoryView('all')" style="flex:1;padding:7px;border:none;border-radius:6px;background:transparent;color:var(--muted);font-family:var(--font-mono);font-size:11px;letter-spacing:.06em;cursor:pointer;">
           All
         </button>
@@ -684,6 +687,14 @@
           <button onclick="toggleAddLore()" style="background:transparent;color:var(--muted);border:1px solid var(--border);font-family:var(--font-mono);font-size:11px;padding:6px 12px;border-radius:4px;cursor:pointer;">Cancel</button>
         </div>
       </div>
+      <!-- Focus view -->
+      <div id="focusView" style="display:none;">
+        <div id="focusItems"></div>
+        <div id="focusEmpty" style="display:none;text-align:center;padding:32px 20px;font-family:var(--font-mono);font-size:13px;color:var(--muted);">
+          No active focus yet.<br>Send a message and Thais will build a picture of what's on your mind.
+        </div>
+      </div>
+
       <div class="memory-loading" id="memoryLoading">Loading your memories...</div>
       <div class="memory-empty" id="memoryEmpty" style="display:none;">
         Thais hasn't learned anything about you yet.<br>Start a conversation and she'll begin building a picture of how you work.
@@ -896,10 +907,28 @@ function toggleMemoryInfo() {
 function setMemoryView(mode) {
   memoryViewMode = mode;
   var recentBtn = document.getElementById('memRecentBtn');
+  var focusBtn = document.getElementById('memFocusBtn');
   var allBtn = document.getElementById('memAllBtn');
   var accent = 'var(--accent)', none = 'transparent', dark = '#0a0a0a', muted = 'var(--muted)';
   if (recentBtn) { recentBtn.style.background = mode === 'recent' ? accent : none; recentBtn.style.color = mode === 'recent' ? dark : muted; }
+  if (focusBtn) { focusBtn.style.background = mode === 'focus' ? accent : none; focusBtn.style.color = mode === 'focus' ? dark : muted; }
   if (allBtn) { allBtn.style.background = mode === 'all' ? accent : none; allBtn.style.color = mode === 'all' ? dark : muted; }
+
+  var focusView = document.getElementById('focusView');
+  var memoryGroups = document.getElementById('memoryGroups');
+  var memoryLoading = document.getElementById('memoryLoading');
+  var memoryEmpty = document.getElementById('memoryEmpty');
+
+  if (mode === 'focus') {
+    if (focusView) focusView.style.display = 'block';
+    if (memoryGroups) memoryGroups.style.display = 'none';
+    if (memoryEmpty) memoryEmpty.style.display = 'none';
+    loadFocusView();
+    return;
+  }
+
+  if (focusView) focusView.style.display = 'none';
+  if (memoryGroups) memoryGroups.style.display = 'block';
 
   if (mode === 'recent') {
     var recent = allMemories.slice().sort(function(a, b) {
@@ -912,8 +941,48 @@ function setMemoryView(mode) {
   renderMemoryGroups(allMemories);
 }
 
+function loadFocusView() {
+  var token = typeof authToken !== 'undefined' ? authToken : null;
+  if (!token) return;
+  var container = document.getElementById('focusItems');
+  var empty = document.getElementById('focusEmpty');
+  if (container) container.innerHTML = '<div style="font-family:var(--font-mono);font-size:12px;color:var(--muted);padding:16px 0;">Loading...</div>';
+  if (empty) empty.style.display = 'none';
+  fetch('/api/focus', { headers: { 'Authorization': 'Bearer ' + token } })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      var items = (data && data.focus) ? data.focus : [];
+      if (!container) return;
+      container.innerHTML = '';
+      if (items.length === 0) {
+        if (empty) empty.style.display = 'block';
+        return;
+      }
+      var intensityOrder = { high: 0, medium: 1, low: 2 };
+      items.sort(function(a, b) { return (intensityOrder[a.intensity] || 1) - (intensityOrder[b.intensity] || 1); });
+      items.forEach(function(item) {
+        var card = document.createElement('div');
+        card.style.cssText = 'background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:12px 14px;margin-bottom:10px;';
+        var dotColor = item.intensity === 'high' ? 'var(--accent)' : item.intensity === 'low' ? 'var(--muted)' : '#8b8bff';
+        card.innerHTML =
+          '<div style="display:flex;align-items:flex-start;gap:10px;">' +
+            '<span style="width:8px;height:8px;border-radius:50%;background:' + dotColor + ';flex-shrink:0;margin-top:4px;"></span>' +
+            '<div style="flex:1;">' +
+              '<div style="font-family:var(--font-mono);font-size:13px;color:var(--text);line-height:1.4;margin-bottom:5px;">' + escapeHtml(item.topic) + '</div>' +
+              '<div style="font-family:var(--font-mono);font-size:11px;color:var(--muted);line-height:1.4;">' + escapeHtml(item.context) + '</div>' +
+            '</div>' +
+            '<span style="font-family:var(--font-mono);font-size:10px;letter-spacing:.08em;color:' + dotColor + ';flex-shrink:0;margin-top:2px;">' + item.intensity + '</span>' +
+          '</div>';
+        container.appendChild(card);
+      });
+    })
+    .catch(function() {
+      if (container) container.innerHTML = '<div style="font-family:var(--font-mono);font-size:12px;color:var(--muted);padding:16px 0;">Could not load focus.</div>';
+    });
+}
+
 function renderMemoryFlat(memories) {
-  var container = document.getElementById('memoryContainer');
+  var container = document.getElementById('memoryGroups');
   if (!container) return;
   container.innerHTML = '';
   if (!memories || memories.length === 0) {
