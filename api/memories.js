@@ -665,5 +665,37 @@ export default async function handler(req, res) {
     }
   }
 
+  // POST — create a new memory directly (used by the lore form in the UI)
+  if (req.method === 'POST') {
+    const { category, content, anchor, weight, source, confidence } = req.body;
+    if (!content || !content.trim()) return res.status(400).json({ error: 'Content required' });
+    const validCategories = ['personal', 'work', 'idea', 'plan', 'lore'];
+    const cat = validCategories.includes(category) ? category : 'lore';
+    try {
+      const inserted = await sbFetch('/memories', {
+        method: 'POST',
+        headers: { 'Prefer': 'return=representation' },
+        body: JSON.stringify({
+          user_id: authenticatedUserId,
+          category: cat,
+          weight: weight === 'minor' ? 'minor' : 'major',
+          content: content.trim(),
+          source: source === 'inferred' ? 'inferred' : 'stated',
+          confidence: ['high', 'medium', 'low'].includes(confidence) ? confidence : 'high',
+          anchor: anchor === true,
+          sequence: 0,
+          occurrences: 1,
+          superseded: false,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        }),
+      });
+      return res.status(200).json({ success: true, memory: inserted[0] || null });
+    } catch (err) {
+      console.error('[memories POST] error:', err.message);
+      return res.status(500).json({ error: 'Failed to create memory' });
+    }
+  }
+
   return res.status(405).json({ error: 'Method not allowed' });
 }
