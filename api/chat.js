@@ -818,12 +818,24 @@ function buildSystemPrompt(workflow, memoryContext, searchContext, currentDateTi
 
 // -- Memory extraction ------------------------------------------------
 
-async function extractAndStoreMemory(userId, userMessage, assistantMessage, conversationHistory, sequence) {
+async function extractAndStoreMemory(userId, userMessage, assistantMessage, conversationHistory, sequence, knownMemories) {
   try {
     const recentExchange = conversationHistory
       .slice(-6)
       .map(function(m) { return (m.role === 'user' ? 'User' : 'Thais') + ': ' + m.content; })
       .concat(['User: ' + userMessage, 'Thais: ' + assistantMessage])
+      .join('\n');
+
+    // Facts already on file -- without this, a name/birthday/other incidental
+    // detail that resurfaces naturally in conversation gets re-extracted every
+    // time it's mentioned, each pass phrased slightly differently, and dodges
+    // dedup because the wording never matches closely enough. The fix is to
+    // not re-extract it at all unless it's actually new or correcting
+    // something, rather than relying on cleanup after the fact.
+    const knownList = (knownMemories || [])
+      .filter(function(m) { return m.anchor || m.source === 'stated'; })
+      .slice(0, 40)
+      .map(function(m) { return '- ' + m.content; })
       .join('\n');
 
     const extractionPrompt = [
@@ -841,6 +853,11 @@ async function extractAndStoreMemory(userId, userMessage, assistantMessage, conv
       'WEIGHTS: major (significant) or minor (useful detail)',
       'SOURCE: stated (said directly) or inferred (you concluded it)',
       'ANCHOR: true only for core orientation points -- use very sparingly',
+      '',
+      'ALREADY KNOWN -- do NOT re-extract any of these just because they came up',
+      'again in conversation. Only extract something related to one of these if',
+      'it is genuinely NEW information, an update, or a correction:',
+      knownList || '(nothing on file yet)',
       '',
       'STATED MEMORIES MUST BE LITERAL. If source is "stated", the content must',
       'be the user\'s own fact in their own words from THIS conversation -- not your',
@@ -1133,7 +1150,7 @@ export default async function handler(req, res) {
     let memoryFormations = [];
     if (isLoggedIn) {
       const extraction = await extractAndStoreMemory(
-        userId, message, assistantMessage, sanitized, sequence
+        userId, message, assistantMessage, sanitized, sequence, memories
       );
       suggestQuestion = extraction.suggestQuestion;
       memoryFormations = extraction.formations || [];
