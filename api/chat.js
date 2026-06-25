@@ -499,22 +499,32 @@ async function loadMemory(userId, currentMessage, recentHistory) {
       return { m, hits, s: scoreMemory(m) };
     });
 
+    // Recent guarantee: always inject the 5 newest memories regardless of topic,
+    // so brand-new low-score memories always reach Thais on the turn they form.
+    const RECENT_GUARANTEE = 5;
+    const recentGuaranteed = nonAnchors
+      .slice()
+      .sort(function(a, b) { return new Date(b.updated_at) - new Date(a.updated_at); })
+      .slice(0, RECENT_GUARANTEE);
+    const guaranteedIds = new Set(recentGuaranteed.map(function(m) { return m.id; }));
+
+    const topicBudget = Math.max(0, remainingBudget - RECENT_GUARANTEE);
     const onTopic = scored
-      .filter(function(x) { return x.hits > 0; })
+      .filter(function(x) { return x.hits > 0 && !guaranteedIds.has(x.m.id); })
       .sort(function(a, b) { return (b.hits - a.hits) || (b.s - a.s); })
-      .slice(0, remainingBudget)
+      .slice(0, topicBudget)
       .map(function(x) { return x.m; });
 
-    const leftoverBudget = remainingBudget - onTopic.length;
-    let ranked = onTopic;
+    const leftoverBudget = remainingBudget - RECENT_GUARANTEE - onTopic.length;
+    let ranked = recentGuaranteed.concat(onTopic);
     if (leftoverBudget > 0) {
-      const onTopicIds = new Set(onTopic.map(function(m) { return m.id; }));
+      const usedIds = new Set(ranked.map(function(m) { return m.id; }));
       const continuity = scored
-        .filter(function(x) { return x.hits === 0 && !onTopicIds.has(x.m.id); })
+        .filter(function(x) { return x.hits === 0 && !usedIds.has(x.m.id); })
         .sort(function(a, b) { return new Date(b.m.updated_at) - new Date(a.m.updated_at); })
         .slice(0, leftoverBudget)
         .map(function(x) { return x.m; });
-      ranked = onTopic.concat(continuity);
+      ranked = ranked.concat(continuity);
     }
 
     return anchors.concat(ranked);

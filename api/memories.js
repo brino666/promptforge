@@ -548,12 +548,8 @@ export default async function handler(req, res) {
       }
     }
 
-    // Normal fetch — return prioritized memories for the panel
+    // Normal fetch — return all memories for the panel
     try {
-      // Order by recency at the DB level too -- otherwise with 400+ rows
-      // stored, a weight/confidence-first order can cut off the newest
-      // (still low-confidence/unconfirmed) memories before they're even
-      // fetched, so they'd never reach the prioritization step below.
       const all = await sbFetch(
         '/memories?user_id=eq.' + encodeURIComponent(authenticatedUserId) +
         '&superseded=eq.false' +
@@ -561,8 +557,9 @@ export default async function handler(req, res) {
         '&limit=400'
       );
 
-      // Apply smart prioritization — show top 200 in panel
-      const memories = prioritizeMemories(all, 200);
+      // No pre-scoring for the panel — return everything so Recent tab always
+      // shows the truly newest memories, not just the highest-scored ones.
+      const memories = all;
 
       // Tag each memory with its Constitution memory tier (active/working/knowledge/archive),
       // computed live so the user can see why a memory is weighted the way it is.
