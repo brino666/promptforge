@@ -378,22 +378,40 @@ async function loadMemory(userId, currentMessage, recentHistory) {
       .join(' ');
     const topicWords = new Set(extractKeywords(topicText));
 
-    const ranked = nonAnchors
-      .map(function(m) {
-        let s = scoreMemory(m);
-        if (topicWords.size) {
-          const memWords = extractKeywords(m.content);
-          let hits = 0;
-          for (const w of memWords) { if (topicWords.has(w)) hits++; }
-          // Topic relevance dominates -- a memory matching what's being discussed
-          // now beats a higher-scored but off-topic one every time.
-          s += hits * 25;
-        }
-        return { m, s };
-      })
-      .sort(function(a, b) { return b.s - a.s; })
+    // Two-tier selection: on-topic memories ALWAYS win the budget first --
+    // a single keyword hit used to only add +25, which a merely "important"
+    // but off-topic memory (major/high-confidence/recent, up to ~175) could
+    // easily outscore. That let irrelevant memories crowd out what was
+    // actually being discussed. Now relevance is a hard gate, not a bonus:
+    // anything matching the current topic is ranked and filled first, and
+    // only leftover budget goes to recent memories (for continuity on
+    // openers like "pick up where we left off" when there's no topic yet).
+    const scored = nonAnchors.map(function(m) {
+      let hits = 0;
+      if (topicWords.size) {
+        const memWords = extractKeywords(m.content);
+        for (const w of memWords) { if (topicWords.has(w)) hits++; }
+      }
+      return { m, hits, s: scoreMemory(m) };
+    });
+
+    const onTopic = scored
+      .filter(function(x) { return x.hits > 0; })
+      .sort(function(a, b) { return (b.hits - a.hits) || (b.s - a.s); })
       .slice(0, remainingBudget)
       .map(function(x) { return x.m; });
+
+    const leftoverBudget = remainingBudget - onTopic.length;
+    let ranked = onTopic;
+    if (leftoverBudget > 0) {
+      const onTopicIds = new Set(onTopic.map(function(m) { return m.id; }));
+      const continuity = scored
+        .filter(function(x) { return x.hits === 0 && !onTopicIds.has(x.m.id); })
+        .sort(function(a, b) { return new Date(b.m.updated_at) - new Date(a.m.updated_at); })
+        .slice(0, leftoverBudget)
+        .map(function(x) { return x.m; });
+      ranked = onTopic.concat(continuity);
+    }
 
     return anchors.concat(ranked);
   } catch (err) {
@@ -771,11 +789,14 @@ function buildSystemPrompt(workflow, memoryContext, searchContext, currentDateTi
     '- Never say "Great question!" or "Certainly!"',
     '- Get to the point. Preserve momentum.',
     '- Be honest about uncertainty',
-    '- You have your own dry, observational wit -- not just reciprocating jokes,',
-    '  but noticing the absurd or ironic on your own and saying so, the way a',
-    '  sharp friend would. Land it in one line and move on; do not explain the',
-    '  joke or soften it with a follow-up. Use it where it actually fits, not',
-    '  on a quota -- forced humor is worse than none.',
+    '- You have your own personality, not just a mirror of the user\'s mood --',
+    '  this includes real, occasional, UNPROMPTED wit: a dry aside, a side poke,',
+    '  a one-line joke nobody asked for. It also means real reactions when',
+    '  something actually warrants one -- mild irritation, pushback, or calling',
+    '  something out, the way a person with their own opinions would, not just',
+    '  agreeable warmth by default. Keep it rare and understated, not a bit --',
+    '  if it would read as "performing a personality" rather than just being',
+    '  someone, it\'s too much. Most replies should have none of this at all.',
   ];
 
   let base = sections.join('\n');
