@@ -4,6 +4,31 @@
 
 import Anthropic from '@anthropic-ai/sdk';
 
+const FAL_KEY = process.env.FAL_KEY;
+
+async function generateImage(prompt, size, quality) {
+  if (!FAL_KEY) throw new Error('FAL_KEY not configured');
+  const model = quality === 'dev' ? 'fal-ai/flux/dev' : 'fal-ai/flux/schnell';
+  const res = await fetch('https://fal.run/' + model, {
+    method: 'POST',
+    headers: { 'Authorization': 'Key ' + FAL_KEY, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      prompt,
+      image_size: size || 'landscape_4_3',
+      num_images: 1,
+      enable_safety_checker: true,
+    }),
+  });
+  if (!res.ok) {
+    const err = await res.text();
+    throw new Error('fal.ai error: ' + err);
+  }
+  const data = await res.json();
+  const url = data.images && data.images[0] && data.images[0].url;
+  if (!url) throw new Error('No image URL in response');
+  return url;
+}
+
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
 // ── Tool definitions ─────────────────────────────────────────
@@ -76,6 +101,19 @@ const TOOLS = [
         reason: { type: 'string', description: 'One sentence on why live search is needed here' },
       },
       required: ['query'],
+    },
+  },
+  {
+    name: 'generate_image',
+    description: 'Generate an image from a text description using AI. Use when the user asks to create, generate, draw, or visualize something as an image. Write a detailed, vivid prompt describing exactly what should appear in the image.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        prompt: { type: 'string', description: 'Detailed description of the image to generate. Be specific about subject, style, lighting, composition, colors.' },
+        size: { type: 'string', enum: ['square', 'landscape_4_3', 'landscape_16_9', 'portrait_4_3', 'portrait_16_9'], description: 'Image dimensions. Default landscape_4_3 for most images.' },
+        quality: { type: 'string', enum: ['schnell', 'dev'], description: 'schnell = fast (default), dev = higher quality but slower' },
+      },
+      required: ['prompt'],
     },
   },
   {
@@ -1399,6 +1437,18 @@ export default async function handler(req, res) {
           toolResult = calc.success
             ? String(calc.result) + (toolUseBlock.input.unit ? ' ' + toolUseBlock.input.unit : '')
             : 'Calculation error: ' + calc.error;
+        } else if (toolUseBlock.name === 'generate_image') {
+          try {
+            const imgUrl = await generateImage(
+              toolUseBlock.input.prompt,
+              toolUseBlock.input.size,
+              toolUseBlock.input.quality
+            );
+            toolOutput = { type: 'image', url: imgUrl, prompt: toolUseBlock.input.prompt };
+            toolResult = 'Image generated successfully. URL: ' + imgUrl;
+          } catch (imgErr) {
+            toolResult = 'Image generation failed: ' + imgErr.message;
+          }
         } else if (toolUseBlock.name === 'preview_code') {
           toolOutput = { type: 'preview_code', payload: toolUseBlock.input };
           toolResult = 'Code preview rendered. The user can see it live and download the source.';

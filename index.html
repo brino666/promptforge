@@ -1558,6 +1558,26 @@ function renderToolOutput(toolOutput) {
     btn.textContent = '⬇ ' + (p.filename || 'Download file');
     wrap.appendChild(btn);
 
+  } else if (toolOutput.type === 'image') {
+    const label = document.createElement('div');
+    label.className = 'tool-output-label';
+    label.textContent = 'Generated image';
+    wrap.appendChild(label);
+
+    const img = document.createElement('img');
+    img.src = toolOutput.url;
+    img.alt = toolOutput.prompt || 'Generated image';
+    img.style.cssText = 'width:100%;border-radius:6px;display:block;margin-bottom:10px;';
+    wrap.appendChild(img);
+
+    const dlBtn = document.createElement('a');
+    dlBtn.className = 'file-download';
+    dlBtn.href = toolOutput.url;
+    dlBtn.target = '_blank';
+    dlBtn.download = 'image.jpg';
+    dlBtn.textContent = '⬇ Download image';
+    wrap.appendChild(dlBtn);
+
   } else if (toolOutput.type === 'preview_code') {
     const p = toolOutput.payload;
 
