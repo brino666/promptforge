@@ -1180,6 +1180,17 @@ async function convertPrompt() {
     const parsed = JSON.parse(clean);
     parsedBlocks = parsed; assembledPrompt = parsed.assembled; renderOutput(parsed);
     if (chatUserId === 'anonymous') usedFreeForge = true; // mark the free preview as spent
+    // Archive the Forge result so Thais can recall full documents later
+    if (chatUserId && chatUserId !== 'anonymous') {
+      const { data: { session } } = await supabaseClient.auth.getSession();
+      if (session) {
+        fetch('/api/sessions', {
+          method: 'POST',
+          headers: { 'Authorization': 'Bearer ' + session.access_token, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ prompt: raw, result: parsed.assembled, summary: parsed.objective || '' }),
+        }).catch(function() {}); // fire and forget
+      }
+    }
   } catch (err) {
     errorMsg.textContent = 'Something went wrong. Please try again.'; errorMsg.classList.add('visible');
   } finally {
