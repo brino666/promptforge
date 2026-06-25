@@ -889,7 +889,6 @@ function renderMemoryCard(memory) {
   var occurrenceText = memory.occurrences > 1 ? 'mentioned ' + memory.occurrences + 'x' : 'mentioned once';
   var anchorBadge = memory.anchor ? '<span class="confidence-badge high">anchor</span>' : '';
   var weightBadge = memory.weight === 'major' ? '<span class="confidence-badge medium">major</span>' : '';
-  // Format timestamp as date and time
   var timeText = '';
   if (memory.updated_at) {
     timeText = new Date(memory.updated_at).toLocaleString('en-US', {
@@ -899,7 +898,7 @@ function renderMemoryCard(memory) {
     });
   }
   card.innerHTML =
-    '<div class="memory-card-content">' + escapeHtml(memory.content) + '</div>' +
+    '<div class="memory-card-content" id="mc-text-' + memory.id + '">' + escapeHtml(memory.content) + '</div>' +
     '<div class="memory-card-meta">' +
       '<div class="memory-card-tags">' +
         '<span class="confidence-badge ' + memory.confidence + '">' + memory.confidence + '</span>' +
@@ -909,10 +908,44 @@ function renderMemoryCard(memory) {
       '</div>' +
     '</div>';
   var meta = card.querySelector('.memory-card-meta');
+
+  var copyBtn = document.createElement('button');
+  copyBtn.className = 'memory-delete-btn';
+  copyBtn.textContent = 'Copy';
+  copyBtn.style.marginRight = '4px';
+  copyBtn.addEventListener('click', function() { copyToClipboard(memory.content, 'Copied'); });
+
+  var editBtn = document.createElement('button');
+  editBtn.className = 'memory-delete-btn';
+  editBtn.textContent = 'Edit';
+  editBtn.style.marginRight = '4px';
+  editBtn.addEventListener('click', function() {
+    var contentEl = document.getElementById('mc-text-' + memory.id);
+    if (editBtn.textContent === 'Edit') {
+      contentEl.contentEditable = 'true';
+      contentEl.style.outline = '1px solid var(--accent)';
+      contentEl.style.borderRadius = '4px';
+      contentEl.focus();
+      editBtn.textContent = 'Save';
+    } else {
+      var newContent = contentEl.textContent.trim();
+      contentEl.contentEditable = 'false';
+      contentEl.style.outline = '';
+      editBtn.textContent = 'Edit';
+      if (newContent && newContent !== memory.content) {
+        updateMemory(memory.id, newContent);
+        memory.content = newContent;
+      }
+    }
+  });
+
   var deleteBtn = document.createElement('button');
   deleteBtn.className = 'memory-delete-btn';
   deleteBtn.textContent = 'Delete';
   deleteBtn.addEventListener('click', function() { deleteMemory(memory.id); });
+
+  meta.appendChild(copyBtn);
+  meta.appendChild(editBtn);
   meta.appendChild(deleteBtn);
   return card;
 }
@@ -944,7 +977,9 @@ function renderMemoryGroups(memories) {
   });
   categoryOrder.forEach(function(cat) {
     if (!grouped[cat] || grouped[cat].length === 0) return;
-    var items = grouped[cat];
+    var items = grouped[cat].slice().sort(function(a, b) {
+      return new Date(b.updated_at) - new Date(a.updated_at);
+    });
     var group = document.createElement('div');
     group.className = 'memory-group';
     group.innerHTML = '<div class="memory-group-label">' + (categoryLabels[cat] || cat) + '<span class="memory-group-count">' + items.length + '</span></div>';
@@ -984,6 +1019,24 @@ async function loadMemories() {
   }
 }
 
+
+async function updateMemory(id, newContent) {
+  try {
+    const { data: { session } } = await supabaseClient.auth.getSession();
+    if (!session) { showToast('Not signed in'); return; }
+    const res = await fetch('/api/memories', {
+      method: 'PATCH',
+      headers: { 'Authorization': 'Bearer ' + session.access_token, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id, content: newContent }),
+    });
+    if (!res.ok) throw new Error('Update failed');
+    showToast('Memory updated');
+    allMemories = allMemories.map(function(m) { return m.id === id ? Object.assign({}, m, { content: newContent, updated_at: new Date().toISOString() }) : m; });
+  } catch (err) {
+    showToast('Update failed');
+    console.error('[updateMemory]', err);
+  }
+}
 
 async function deleteMemory(id) {
   try {

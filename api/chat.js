@@ -935,8 +935,7 @@ async function extractAndStoreMemory(userId, userMessage, assistantMessage, conv
     // not re-extract it at all unless it's actually new or correcting
     // something, rather than relying on cleanup after the fact.
     const knownList = (knownMemories || [])
-      .filter(function(m) { return m.anchor || m.source === 'stated'; })
-      .slice(0, 40)
+      .slice(0, 60)
       .map(function(m) { return '- ' + m.content; })
       .join('\n');
 
@@ -1009,8 +1008,15 @@ async function extractAndStoreMemory(userId, userMessage, assistantMessage, conv
     const result = JSON.parse(clean);
 
     const formations = [];
+    const batchSeen = [];
     if (result.extractions && result.extractions.length > 0) {
       for (const extraction of result.extractions) {
+        const snippet = extraction.content.slice(0, 60).toLowerCase().replace(/['"]/g, '');
+        const batchDupe = batchSeen.some(function(s) {
+          return s.includes(snippet) || snippet.includes(s);
+        });
+        if (batchDupe) continue;
+        batchSeen.push(snippet);
         const formed = await upsertMemory(userId, extraction, sequence);
         if (formed) formations.push(formed);
       }

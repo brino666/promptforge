@@ -608,5 +608,30 @@ export default async function handler(req, res) {
     }
   }
 
+  if (req.method === 'PATCH') {
+    const { id, content } = req.body;
+    if (!id || !content || !content.trim()) return res.status(400).json({ error: 'ID and content required' });
+
+    try {
+      const existing = await sbFetch(
+        '/memories?id=eq.' + encodeURIComponent(id) +
+        '&user_id=eq.' + encodeURIComponent(authenticatedUserId) +
+        '&limit=1'
+      );
+      if (!existing || existing.length === 0) return res.status(404).json({ error: 'Memory not found or not yours' });
+
+      await sbFetch('/memories?id=eq.' + encodeURIComponent(id), {
+        method: 'PATCH',
+        headers: { 'Prefer': 'return=minimal' },
+        body: JSON.stringify({ content: content.trim(), updated_at: new Date().toISOString() }),
+      });
+
+      return res.status(200).json({ success: true });
+    } catch (err) {
+      console.error('[memories PATCH] error:', err.message);
+      return res.status(500).json({ error: 'Failed to update memory' });
+    }
+  }
+
   return res.status(405).json({ error: 'Method not allowed' });
 }
