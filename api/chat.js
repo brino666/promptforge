@@ -758,7 +758,7 @@ function buildMemoryContext(memories) {
 
 // -- System prompt ----------------------------------------------------
 
-function buildSystemPrompt(workflow, memoryContext, searchContext, currentDateTime, diagnosticContext, isOwner, isTrialMessage) {
+function buildSystemPrompt(workflow, memoryContext, searchContext, currentDateTime, diagnosticContext, isOwner, isTrialMessage, focusContext) {
   const workflowGuides = {
     content:  'You are helping with a content or writing task. Be creative, clear, direct. Offer concrete drafts rather than meta-advice.',
     code:     'You are helping with a development task. Be precise, show working code, explain reasoning. Catch issues proactively.',
@@ -903,6 +903,10 @@ function buildSystemPrompt(workflow, memoryContext, searchContext, currentDateTi
 
   let base = sections.join('\n');
 
+  if (focusContext && focusContext.trim()) {
+    base = base + '\n\nACTIVE FOCUS — what this person appears to be working through right now:\n' + focusContext + '\nUse this to anticipate, connect threads, and notice when something new relates to an open question. Do not recite this list back.';
+  }
+
   if (memoryContext && memoryContext.trim()) {
     base = base + '\n\n' + memoryContext;
   }
@@ -1024,6 +1028,69 @@ async function extractAndStoreMemory(userId, userMessage, assistantMessage, conv
   }
 }
 
+// -- Focus update -----------------------------------------------------
+// Infers what the user is currently focused on from the latest exchange
+// and rewrites the focus table. Small Haiku call, non-blocking.
+
+async function updateFocus(userId, userMessage, assistantMessage, history, existingFocusContext) {
+  const recentTurns = history.slice(-4)
+    .map(function(m) { return (m.role === 'user' ? 'User' : 'Thais') + ': ' + m.content; })
+    .concat(['User: ' + userMessage, 'Thais: ' + assistantMessage])
+    .join('\n');
+
+  const prompt = [
+    'You maintain a live focus model — what this person is actively working through right now.',
+    'Update it based on this conversation exchange.',
+    '',
+    'CURRENT FOCUS:',
+    existingFocusContext || '(none yet)',
+    '',
+    'LATEST EXCHANGE:',
+    recentTurns,
+    '',
+    'Return up to 8 focus items. Each is a short active thread — a problem being worked on,',
+    'a question circling back, a decision pending, a project in motion.',
+    'Intensity: high (front of mind right now), medium (active but not urgent), low (background).',
+    'Drop items that feel clearly resolved. Keep items the user keeps returning to.',
+    'Context should be 1 short sentence explaining why you think this is on their mind.',
+    '',
+    'Respond ONLY with valid JSON, no markdown:',
+    '{"items":[{"topic":"...","context":"...","intensity":"high|medium|low"}]}',
+    'If nothing clear: {"items":[]}',
+  ].join('\n');
+
+  const response = await anthropic.messages.create({
+    model: 'claude-haiku-4-5-20251001',
+    max_tokens: 600,
+    messages: [{ role: 'user', content: prompt }],
+  });
+
+  const raw = (response.content[0] && response.content[0].text) ? response.content[0].text : '';
+  const parsed = JSON.parse(raw.replace(/```json|```/g, '').trim());
+  if (!parsed.items || parsed.items.length === 0) return;
+
+  await sbFetch('/focus?user_id=eq.' + encodeURIComponent(userId), {
+    method: 'DELETE',
+    headers: { 'Prefer': 'return=minimal' },
+  });
+
+  const rows = parsed.items.slice(0, 10).map(function(item) {
+    return {
+      user_id: userId,
+      topic: (item.topic || '').slice(0, 300),
+      context: (item.context || '').slice(0, 500),
+      intensity: ['high', 'medium', 'low'].includes(item.intensity) ? item.intensity : 'medium',
+      updated_at: new Date().toISOString(),
+    };
+  });
+
+  await sbFetch('/focus', {
+    method: 'POST',
+    headers: { 'Prefer': 'return=minimal' },
+    body: JSON.stringify(rows),
+  });
+}
+
 // -- Main handler -----------------------------------------------------
 
 export default async function handler(req, res) {
@@ -1092,6 +1159,25 @@ export default async function handler(req, res) {
     const memories = isLoggedIn ? await loadMemory(userId, message, history) : [];
     const memoryContext = buildMemoryContext(memories);
     const sequence = isLoggedIn ? await getNextSequence(userId) : 0;
+
+    // Load current focus state for injection into system prompt
+    let focusContext = '';
+    if (isLoggedIn) {
+      try {
+        const focusRows = await sbFetch(
+          '/focus?user_id=eq.' + encodeURIComponent(userId) +
+          '&order=updated_at.desc&limit=10'
+        );
+        if (focusRows && focusRows.length > 0) {
+          focusContext = focusRows.map(function(f) {
+            return '[' + f.intensity.toUpperCase() + '] ' + f.topic +
+              (f.context ? ' — ' + f.context : '');
+          }).join('\n');
+        }
+      } catch (err) {
+        console.error('[focus load]', err.message);
+      }
+    }
 
     // Build current date/time string to send to Thais.
     // FIX: server (Vercel) runs in UTC by default. Without an explicit timeZone,
@@ -1208,7 +1294,7 @@ export default async function handler(req, res) {
       .concat([{ role: 'user', content: userContent }]);
 
     const isTrialMessage = !isLoggedIn; // by this point in the handler, an anonymous request has already survived the history.length > 0 gate, so any remaining anonymous request is exactly the one free message
-    const systemPrompt = buildSystemPrompt(activeWorkflow, memoryContext, searchContext, currentDateTime, diagnosticContext, isOwner, isTrialMessage);
+    const systemPrompt = buildSystemPrompt(activeWorkflow, memoryContext, searchContext, currentDateTime, diagnosticContext, isOwner, isTrialMessage, focusContext);
 
     const response = await anthropic.messages.create({
       model: 'claude-sonnet-4-6',
@@ -1348,6 +1434,13 @@ export default async function handler(req, res) {
         // Non-fatal -- log and continue
         console.error('[session write error]', sessionErr.message);
       }
+    }
+
+    // Update focus state — fire and forget, non-blocking
+    if (isLoggedIn) {
+      updateFocus(userId, message, assistantMessage, sanitized, focusContext).catch(function(err) {
+        console.error('[focus update]', err.message);
+      });
     }
 
     return res.status(200).json({
