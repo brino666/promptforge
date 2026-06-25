@@ -946,14 +946,21 @@ function loadFocusView() {
   var empty = document.getElementById('focusEmpty');
   if (container) container.innerHTML = '<div style="font-family:var(--font-mono);font-size:12px;color:var(--muted);padding:16px 0;">Loading...</div>';
   if (empty) empty.style.display = 'none';
+  if (!supabaseClient) {
+    if (container) container.innerHTML = '<div style="font-family:var(--font-mono);font-size:12px;color:var(--muted);padding:16px 0;">Not ready — try again in a moment.</div>';
+    return;
+  }
   supabaseClient.auth.getSession().then(function(result) {
-    var session = result.data && result.data.session;
+    var session = result && result.data && result.data.session;
     if (!session) {
       if (container) container.innerHTML = '<div style="font-family:var(--font-mono);font-size:12px;color:var(--muted);padding:16px 0;">Sign in to see focus.</div>';
       return;
     }
     fetch('/api/focus', { headers: { 'Authorization': 'Bearer ' + session.access_token } })
-    .then(function(r) { return r.json(); })
+    .then(function(r) {
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      return r.json();
+    })
     .then(function(data) {
       var items = (data && data.focus) ? data.focus : [];
       if (!container) return;
