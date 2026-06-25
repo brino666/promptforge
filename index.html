@@ -23,7 +23,7 @@
     --font-mono: 'IBM Plex Mono', monospace;
   }
 
-  body { background: var(--bg); color: var(--text); font-family: var(--font-display); min-height: 100vh; overflow-x: hidden; }
+  body { background: var(--bg); color: var(--text); font-family: var(--font-display); min-height: 100vh; overflow-x: hidden; overscroll-behavior-y: contain; }
 
   body::before {
     content: ''; position: fixed; inset: 0;
@@ -787,6 +787,14 @@ let isListening = false;
     });
   } catch(e) { setLoggedOut(); }
 })();
+
+// Prevent the back button from wiping the conversation on mobile.
+// Push a dummy state so the first back-swipe just pops back to this
+// state instead of navigating away from the page entirely.
+history.pushState(null, '', window.location.href);
+window.addEventListener('popstate', function() {
+  history.pushState(null, '', window.location.href);
+});
 
 function setLoggedIn(user) {
   chatUserId = user.id;
