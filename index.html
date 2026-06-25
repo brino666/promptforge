@@ -1557,6 +1557,59 @@ function renderToolOutput(toolOutput) {
     btn.download = p.filename || 'download';
     btn.textContent = '⬇ ' + (p.filename || 'Download file');
     wrap.appendChild(btn);
+
+  } else if (toolOutput.type === 'preview_code') {
+    const p = toolOutput.payload;
+
+    const label = document.createElement('div');
+    label.className = 'tool-output-label';
+    label.textContent = p.title || 'Preview';
+    wrap.appendChild(label);
+
+    if (p.description) {
+      const desc = document.createElement('div');
+      desc.style.cssText = 'font-family:var(--font-mono);font-size:11px;color:var(--muted);margin-bottom:10px;';
+      desc.textContent = p.description;
+      wrap.appendChild(desc);
+    }
+
+    const frame = document.createElement('iframe');
+    frame.sandbox = 'allow-scripts allow-forms allow-modals';
+    frame.style.cssText = 'width:100%;border:1px solid var(--border);border-radius:6px;background:#fff;min-height:320px;display:block;';
+    frame.srcdoc = p.html;
+    wrap.appendChild(frame);
+
+    // Auto-resize iframe to fit content
+    frame.addEventListener('load', function() {
+      try {
+        const h = frame.contentDocument.documentElement.scrollHeight;
+        if (h > 100) frame.style.height = Math.min(h + 24, 800) + 'px';
+      } catch(e) {}
+    });
+
+    const actions = document.createElement('div');
+    actions.style.cssText = 'display:flex;gap:8px;margin-top:10px;';
+
+    const dlBtn = document.createElement('a');
+    dlBtn.className = 'file-download';
+    dlBtn.style.cssText = 'display:inline-block;';
+    const htmlBlob = new Blob([p.html], { type: 'text/html' });
+    dlBtn.href = URL.createObjectURL(htmlBlob);
+    dlBtn.download = (p.title || 'preview').toLowerCase().replace(/\s+/g, '-') + '.html';
+    dlBtn.textContent = '⬇ Download HTML';
+    actions.appendChild(dlBtn);
+
+    const newTabBtn = document.createElement('button');
+    newTabBtn.style.cssText = 'background:transparent;border:1px solid var(--border);color:var(--muted);font-family:var(--font-mono);font-size:11px;padding:6px 12px;border-radius:4px;cursor:pointer;';
+    newTabBtn.textContent = '↗ Open in tab';
+    newTabBtn.onclick = function() {
+      const w = window.open('', '_blank');
+      w.document.write(p.html);
+      w.document.close();
+    };
+    actions.appendChild(newTabBtn);
+
+    wrap.appendChild(actions);
   }
 
   messages.appendChild(wrap);

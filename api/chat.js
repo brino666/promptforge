@@ -78,6 +78,19 @@ const TOOLS = [
       required: ['query'],
     },
   },
+  {
+    name: 'preview_code',
+    description: 'Render a live interactive preview of HTML/CSS/JavaScript code directly in the chat. Use this whenever building a webpage, UI component, interactive demo, animation, form, calculator, or any visual web thing. Write complete, self-contained HTML. The user will see it rendered live and can download the source.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        html: { type: 'string', description: 'Complete self-contained HTML document including any inline CSS and JS. Must be valid HTML5.' },
+        title: { type: 'string', description: 'Short title shown above the preview, e.g. "Motorcycle maintenance checklist"' },
+        description: { type: 'string', description: 'One sentence describing what this does' },
+      },
+      required: ['html', 'title'],
+    },
+  },
 ];
 
 function runCalculation(expression) {
@@ -1386,6 +1399,9 @@ export default async function handler(req, res) {
           toolResult = calc.success
             ? String(calc.result) + (toolUseBlock.input.unit ? ' ' + toolUseBlock.input.unit : '')
             : 'Calculation error: ' + calc.error;
+        } else if (toolUseBlock.name === 'preview_code') {
+          toolOutput = { type: 'preview_code', payload: toolUseBlock.input };
+          toolResult = 'Code preview rendered. The user can see it live and download the source.';
         } else {
           toolResult = 'Unknown tool.';
         }
