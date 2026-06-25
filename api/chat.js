@@ -922,18 +922,18 @@ function buildSystemPrompt(workflow, memoryContext, searchContext, currentDateTi
 
 async function extractAndStoreMemory(userId, userMessage, assistantMessage, conversationHistory, sequence, knownMemories) {
   try {
-    const recentExchange = conversationHistory
+    // Only extract from the USER's side of the conversation. Thais's responses
+    // are derived from existing memories and knowledge — extracting from them
+    // is exactly what caused recall→paraphrase→new memory loops. When Thais
+    // paraphrases a memory in her reply, that paraphrase must never become a
+    // new stored memory. Only what the user actually said can be new information.
+    const userTurns = conversationHistory
       .slice(-6)
-      .map(function(m) { return (m.role === 'user' ? 'User' : 'Thais') + ': ' + m.content; })
-      .concat(['User: ' + userMessage, 'Thais: ' + assistantMessage])
+      .filter(function(m) { return m.role === 'user'; })
+      .map(function(m) { return 'User: ' + m.content; })
+      .concat(['User: ' + userMessage])
       .join('\n');
 
-    // Facts already on file -- without this, a name/birthday/other incidental
-    // detail that resurfaces naturally in conversation gets re-extracted every
-    // time it's mentioned, each pass phrased slightly differently, and dodges
-    // dedup because the wording never matches closely enough. The fix is to
-    // not re-extract it at all unless it's actually new or correcting
-    // something, rather than relying on cleanup after the fact.
     const knownList = (knownMemories || [])
       .slice(0, 60)
       .map(function(m) { return '- ' + m.content; })
@@ -941,7 +941,7 @@ async function extractAndStoreMemory(userId, userMessage, assistantMessage, conv
 
     const extractionPrompt = [
       'You are the memory extraction system for Thais, an AI workspace.',
-      'Extract specific, useful memories using this taxonomy.',
+      'Extract specific, useful memories from the USER\'s messages only.',
       '',
       'CATEGORIES:',
       '- personal: who the person is, their life, identity, relationships, habits',
@@ -952,46 +952,42 @@ async function extractAndStoreMemory(userId, userMessage, assistantMessage, conv
       '  defining experiences, background, the fabric of who they are',
       '',
       'WEIGHTS: major (significant) or minor (useful detail)',
-      'SOURCE: stated (said directly) or inferred (you concluded it)',
+      'SOURCE: stated (said directly) or inferred (you concluded it from what the user said)',
       'ANCHOR: true only for core orientation points -- use very sparingly',
       '',
-      'ALREADY KNOWN -- do NOT re-extract any of these just because they came up',
-      'again in conversation. Only extract something related to one of these if',
-      'it is genuinely NEW information, an update, or a correction:',
+      'ALREADY KNOWN -- do NOT re-extract any of these:',
       knownList || '(nothing on file yet)',
       '',
-      'STATED MEMORIES MUST BE LITERAL. If source is "stated", the content must',
-      'be the user\'s own fact in their own words from THIS conversation -- not your',
-      'paraphrase or summary of it. If you are characterizing, summarizing, or',
-      'drawing a conclusion rather than relaying something said outright, mark it',
-      '"inferred" -- never label your own inference as "stated".',
+      '═══ VERBATIM RULE (most important rule) ═══',
+      'Memories are stored as the user\'s EXACT WORDS. Not your summary. Not your paraphrase.',
+      'Copy what they said, word for word.',
       '',
-      'INFERRED MEMORIES MUST ALSO BE STORED CLOSE TO VERBATIM -- quote or closely',
-      'paraphrase the actual triggering statement/moment, do NOT rephrase an',
-      'inference into your own polished wording at extraction time. This matters:',
-      'if you reword an ambiguous thought into your own phrasing, then encounter',
-      'the same ambiguous thought again later and reword it AGAIN (differently),',
-      'neither version text-matches the other, so deduplication cannot recognize',
-      'them as the same thing -- this is exactly how single uncertain guesses have',
-      'spiraled into many "different" memories that were really one repeated guess.',
-      'Keep inferred content close to the source text. Only synthesize an inferred',
-      'memory into clean prose in your own words once it has actually graduated to',
-      'stated/confirmed by the user, or through the deliberate compression process',
-      '-- never silently at extraction time.',
+      'STATED: Copy the user\'s exact phrasing from the conversation. If they said',
+      '"I\'m building an app called Thais" — store exactly "I\'m building an app called Thais".',
+      'Do NOT clean it up, polish it, or rephrase it as a clean declarative sentence.',
+      '',
+      'INFERRED: Quote the specific thing they said that led to your inference, then',
+      'append your inference in brackets. Example:',
+      '"I\'ve been doing this for 20 years [inferred: highly experienced in this domain]"',
+      'Do NOT rewrite the whole thing in your own words.',
+      '',
+      'WHY THIS MATTERS: Thais paraphrases memories naturally when she recalls them.',
+      'If you store your own paraphrase, then her recall paraphrases YOUR paraphrase,',
+      'and that second version gets stored again — differently worded — and dedup misses it.',
+      'Verbatim storage breaks this loop. One statement → one memory, no matter how many times recalled.',
       '',
       'BE SPARING WITH INFERENCES. Only extract an inferred memory when it is',
-      'genuinely useful and reasonably confident -- inferences accumulate and',
-      'compound, so a weak or speculative one is worse than skipping it.',
+      'genuinely useful and reasonably confident. Weak inferences accumulate fast.',
       '',
       'SPECIFICITY RULE: Never store summaries when specifics exist.',
       'Bad: "user is building a product"',
-      'Good: "Brino is building Thais, an AI workspace at promptf.space using Vercel and Supabase"',
+      'Good: "I\'m building Thais, an AI workspace at promptf.space using Vercel and Supabase"',
       '',
-      'CONVERSATION:',
-      recentExchange,
+      'USER MESSAGES:',
+      userTurns,
       '',
       'Respond ONLY with valid JSON, no markdown:',
-      '{"extractions":[{"category":"personal|work|idea|plan|lore","weight":"major|minor","content":"specific fact","source":"stated|inferred","confidence":"high|medium|low","anchor":false}],"suggestQuestion":null}',
+      '{"extractions":[{"category":"personal|work|idea|plan|lore","weight":"major|minor","content":"exact user words","source":"stated|inferred","confidence":"high|medium|low","anchor":false}],"suggestQuestion":null}',
       '',
       'If nothing worth extracting: {"extractions":[],"suggestQuestion":null}',
       'Max 4 extractions. Be specific. Look for lore.',
