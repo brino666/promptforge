@@ -662,6 +662,27 @@
         <button id="memAllBtn" onclick="setMemoryView('all')" style="flex:1;padding:7px;border:none;border-radius:6px;background:transparent;color:var(--muted);font-family:var(--font-mono);font-size:11px;letter-spacing:.06em;cursor:pointer;">
           All
         </button>
+        <button onclick="toggleAddLore()" style="padding:7px 12px;border:none;border-radius:6px;background:transparent;color:var(--accent);font-family:var(--font-mono);font-size:11px;letter-spacing:.06em;cursor:pointer;flex-shrink:0;" title="Add permanent lore memory">+ Lore</button>
+      </div>
+
+      <!-- Add lore form — hidden by default -->
+      <div id="addLoreForm" style="display:none;background:var(--surface);border:1px solid var(--accent);border-radius:8px;padding:14px;margin-bottom:16px;">
+        <div style="font-size:10px;font-family:var(--font-mono);letter-spacing:.12em;text-transform:uppercase;color:var(--accent);margin-bottom:10px;">Add Lore Memory</div>
+        <textarea id="loreContent" placeholder="Something Thais should always know about you when it's relevant — a book you wrote, a framework you think in, a project that defines everything else..." style="width:100%;background:var(--surface2);border:1px solid var(--border);color:var(--text);font-family:var(--font-mono);font-size:13px;line-height:1.5;padding:10px;resize:vertical;min-height:80px;outline:none;border-radius:4px;margin-bottom:10px;"></textarea>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+          <select id="loreCategory" style="background:var(--surface2);border:1px solid var(--border);color:var(--text);font-family:var(--font-mono);font-size:11px;padding:6px 8px;border-radius:4px;outline:none;">
+            <option value="lore">lore</option>
+            <option value="personal">personal</option>
+            <option value="work">work</option>
+            <option value="idea">idea</option>
+            <option value="plan">plan</option>
+          </select>
+          <label style="display:flex;align-items:center;gap:5px;font-family:var(--font-mono);font-size:11px;color:var(--muted);cursor:pointer;">
+            <input type="checkbox" id="loreAnchor" checked style="accent-color:var(--accent);"> anchor
+          </label>
+          <button onclick="submitLore()" style="margin-left:auto;background:var(--accent);color:#0a0a0a;border:none;font-family:var(--font-mono);font-size:11px;font-weight:600;padding:6px 16px;border-radius:4px;cursor:pointer;letter-spacing:.06em;">Save</button>
+          <button onclick="toggleAddLore()" style="background:transparent;color:var(--muted);border:1px solid var(--border);font-family:var(--font-mono);font-size:11px;padding:6px 12px;border-radius:4px;cursor:pointer;">Cancel</button>
+        </div>
       </div>
       <div class="memory-loading" id="memoryLoading">Loading your memories...</div>
       <div class="memory-empty" id="memoryEmpty" style="display:none;">
@@ -1043,6 +1064,38 @@ async function loadMemories() {
   }
 }
 
+
+function toggleAddLore() {
+  var form = document.getElementById('addLoreForm');
+  var visible = form.style.display !== 'none';
+  form.style.display = visible ? 'none' : 'block';
+  if (!visible) document.getElementById('loreContent').focus();
+}
+
+async function submitLore() {
+  var content = document.getElementById('loreContent').value.trim();
+  if (!content) { showToast('Enter some content first'); return; }
+  var category = document.getElementById('loreCategory').value;
+  var anchor = document.getElementById('loreAnchor').checked;
+  try {
+    const { data: { session } } = await supabaseClient.auth.getSession();
+    if (!session) { showToast('Not signed in'); return; }
+    const res = await fetch('/api/memories', {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + session.access_token, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ category, content, anchor, weight: 'major', source: 'stated', confidence: 'high' }),
+    });
+    if (!res.ok) throw new Error('Failed');
+    showToast('Lore saved');
+    document.getElementById('loreContent').value = '';
+    document.getElementById('addLoreForm').style.display = 'none';
+    await loadMemories();
+    setMemoryView('recent');
+  } catch (err) {
+    showToast('Save failed');
+    console.error('[submitLore]', err);
+  }
+}
 
 async function updateMemory(id, newContent) {
   try {
